@@ -1,0 +1,9 @@
+[package]
+name = "wasm3d"
+version = "0.1.0"
+authors = ["Leah <me@hrmny.pw>"]
+
+[dependencies]
+webgl = { path = "webgl-rs" }
+application = { path = "application-rs" }
+stdweb = "0.4.6"
