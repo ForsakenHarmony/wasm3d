@@ -1,159 +1,658 @@
-extern crate application;
-extern crate webgl;
+#![feature(proc_macro)]
+#![feature(nll)]
+#![recursion_limit = "512"]
+
+// FIXME: remove this
+#![allow(unused, unused_mut, dead_code)]
+
+#[macro_use]
 extern crate stdweb;
+#[macro_use]
+extern crate stdweb_derive;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate rand;
+extern crate image;
+extern crate cgmath;
 
-use application::*;
-use webgl::*;
+mod engine;
+mod util;
 
-use stdweb::web::INode;
+use engine::webgl::*;
+use engine::app::*;
+use cgmath::{Matrix4, Vector3, Point3, Rad, Deg, SquareMatrix, Transform, EuclideanSpace, Matrix, perspective};
 
-use std::mem::size_of;
-
-mod app;
-
-pub trait IntoBytes {
-    fn into_bytes(self) -> Vec<u8>;
+fn create_shader(gl: &WebGL2RenderingContext, kind: ShaderKind, source: &'static str) -> WebGLShader {
+  let shader = gl.create_shader(kind);
+  gl.shader_source(&shader, source);
+  gl.compile_shader(&shader);
+  shader
 }
 
-impl<T> IntoBytes for Vec<T> {
-    fn into_bytes(self) -> Vec<u8> {
-        let len = size_of::<T>() * self.len();
-        unsafe {
-            let slice = self.into_boxed_slice();
+fn create_program(gl: &WebGL2RenderingContext, vertex: &WebGLShader, fragment: &WebGLShader) -> WebGLProgram {
+  let program = gl.create_program();
+  gl.attach_shader(&program, vertex);
+  gl.attach_shader(&program, fragment);
+  gl.link_program(&program);
+  program
+}
 
-            let out = Vec::<u8>::from_raw_parts(Box::into_raw(slice) as _, len, len);
-            out
-        }
+fn create_texture(gl: &WebGL2RenderingContext, width: u16, height: u16, pixels: &[u8]) -> WebGLTexture {
+  let texture = gl.create_texture();
+  gl.bind_texture(&texture);
+  gl.tex_image2d(TextureBindPoint::Texture2d, 0, width, height, PixelFormat::Rgba, DataType::U8, pixels);
+  gl.generate_mipmap(TextureKind::Texture2d);
+  texture
+}
+
+fn load_image(buffer: &[u8]) -> Result<(u16, u16, Vec<u8>), Box<std::error::Error>> {
+  let img = image::load_from_memory(buffer)?.to_rgba();
+  Ok((img.width() as u16, img.height() as u16, img.into_raw()))
+}
+
+struct MatrixUniform(WebGLUniformLocation);
+
+trait Uniform {
+  type Repr;
+  fn new(loc: WebGLUniformLocation) -> Self;
+  fn set(&self, gl: &WebGL2RenderingContext, val: Self::Repr);
+}
+
+impl Uniform for MatrixUniform {
+  type Repr = Matrix4<f32>;
+
+  fn new(loc: WebGLUniformLocation) -> Self {
+    MatrixUniform(loc)
+  }
+
+  fn set(&self, gl: &WebGL2RenderingContext, val: Self::Repr) {
+    gl.uniform_matrix_4fv(&self.0, val.as_ref());
+  }
+}
+
+fn create_uniform<T: Uniform>(gl: &WebGL2RenderingContext, program: &WebGLProgram, name: &str) -> T {
+  let location = gl.get_uniform_location(&program, name).unwrap();
+  T::new(location)
+}
+
+fn create_and_bind_buffer(gl: &WebGL2RenderingContext, size: AttributeSize, data: &[f32], loc: u32) -> WebGLBuffer {
+  let buffer = gl.create_buffer();
+  gl.bind_buffer(BufferKind::Array, &buffer);
+  gl.buffer_data_float(BufferKind::Array, data, DrawMode::Static);
+  gl.enable_vertex_attrib_array(loc);
+  gl.vertex_attrib_pointer(loc, size, DataType::Float, false, 0, 0);
+  buffer
+}
+
+struct Camera {
+  proj: Matrix4<f32>,
+  view: Matrix4<f32>,
+}
+
+impl Camera {
+  fn perspective(fov: Deg<f32>, aspect: f32, near: f32, far: f32, view: Matrix4<f32>) -> Self {
+    let projection_matrix = perspective(Deg(60.0), aspect, 1.0, 2000.0,);
+
+    Camera {
+      proj: perspective(fov, aspect, near, far),
+      view
     }
+  }
 }
 
+struct Renderer {
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+  camera: Camera,
+}
+
+impl Renderer {
+  pub fn new(gl: WebGL2RenderingContext, vert_code: &'static str, frag_code: &'static str, camera: Camera) -> Self {
+    let vert_shader = create_shader(&gl, ShaderKind::Vertex, vert_code);
+    let frag_shader = create_shader(&gl, ShaderKind::Fragment, frag_code);
+    let program = create_program(&gl, &vert_shader, &frag_shader);
+
+    Renderer {
+      gl,
+      program,
+      camera
+    }
+  }
+
+  pub fn render(&self) {
+    self.gl.use_program(&self.program);
+  }
+}
+
+#[cfg(target_arch = "wasm32")]
 pub fn main() -> Result<(), Box<std::error::Error>> {
-    let size = (800, 600);
-    let config = AppConfig::new("Test", size);
-    let mut app = App::new(config);
+  let size = (1280, 720);
+  let config = AppConfig::new("Test", size);
+  let app = App::new(config);
 
-    let vertices: Vec<f32> = vec![-0.5, 0.5, 0.0, -0.5, -0.5, 0.0, 0.5, -0.5, 0.0];
-    let indices: Vec<u16> = vec![0, 1, 2];
-    let count = indices.len();
+  let img = load_image(include_bytes!("../static/f-texture.png"))?;
 
-    let elem = stdweb::web::document().create_element("canvas");
-    stdweb::web::document().append_child(&elem);
+  let gl = WebGL2RenderingContext::new(app.canvas());
 
-    let gl = WebGLRenderingContext::new(&elem);
+//  let mut rng = rand::thread_rng();
 
-    // Create an empty buffer object to store vertex buffer
-    let vertex_buffer = gl.create_buffer();
+  let vert_code = include_str!("../shaders/vert.glsl");
+  let frag_code = include_str!("../shaders/frag.glsl");
 
-    // Bind appropriate array buffer to it
-    gl.bind_buffer(BufferKind::Array, &vertex_buffer);
+  let vert_shader = create_shader(&gl, ShaderKind::Vertex, vert_code);
 
-    // Pass the vertex data to the buffer
-    gl.buffer_data(BufferKind::Array, &vertices.into_bytes(), DrawMode::Static);
+  let frag_shader = create_shader(&gl, ShaderKind::Fragment, frag_code);
 
-    // Unbind the buffer
-    gl.unbind_buffer(BufferKind::Array);
+  let program = create_program(&gl, &vert_shader, &frag_shader);
 
-    // Create an empty buffer object to store Index buffer
-    let index_buffer = gl.create_buffer();
+  // look up data locations
+  let pos_attr_loc = gl.get_attrib_location(&program, "a_position").unwrap();
+  let tex_coord_loc = gl.get_attrib_location(&program, "a_texcoord").unwrap();
 
-    // Bind appropriate array buffer to it
-    gl.bind_buffer(BufferKind::ElementArray, &index_buffer);
+  let u_matrix = create_uniform::<MatrixUniform>(&gl, &program, "u_matrix");
 
-    // Pass the vertex data to the buffer
-    gl.buffer_data(
-        BufferKind::ElementArray,
-        &indices.into_bytes(),
-        DrawMode::Static,
-    );
+  // look up uniforms
+//  let matrix_loc = gl.get_uniform_location(&program, "u_matrix").unwrap();
 
-    // Unbind the buffer
-    gl.unbind_buffer(BufferKind::ElementArray);
+  let vao = gl.create_vertex_array();
+  gl.bind_vertex_array(&vao);
 
-    /*================ Shaders ====================*/
+  create_and_bind_buffer(&gl, AttributeSize::Three, get_geometry().as_slice(), pos_attr_loc);
+  create_and_bind_buffer(&gl, AttributeSize::Two, get_texcoords(), tex_coord_loc);
 
-    // Vertex shader source code
-    let vert_code = "attribute vec3 coordinates;
-    void main(void) {
-        gl_Position = vec4(coordinates, 1.0);
-    }";
+//  let pos_buffer = gl.create_buffer();
+//  gl.bind_buffer(BufferKind::Array, &pos_buffer);
+//  gl.buffer_data_float(BufferKind::Array, get_geometry(), DrawMode::Static);
+//  gl.enable_vertex_attrib_array(pos_attr_loc);
+//  gl.vertex_attrib_pointer(pos_attr_loc, AttributeSize::Three, DataType::Float, false, 0, 0);
+//
+//  let tex_coord_buffer = gl.create_buffer();
+//  gl.bind_buffer(BufferKind::Array, &tex_coord_buffer);
+//  gl.buffer_data_float(BufferKind::Array, get_texcoords(), DrawMode::Static);
+//  gl.enable_vertex_attrib_array(tex_coord_loc);
+//  gl.vertex_attrib_pointer(tex_coord_loc, AttributeSize::Two, DataType::Float, false, 0, 0);
 
-    // Create a vertex shader object
-    let vert_shader = gl.create_shader(ShaderKind::Vertex);
+  let texture = create_texture(&gl, img.0,img.1, img.2.as_slice());
 
-    // Attach vertex shader source code
-    gl.shader_source(&vert_shader, vert_code);
+//  let texture = gl.create_texture();
+//  gl.active_texture(TextureIndex::Texture0);
+//  gl.bind_texture(&texture);
+//
+//  gl.tex_parameteri(TextureParameter::TextureWrapS, TextureWrap::ClampToEdge as i32);
+//  gl.tex_parameteri(TextureParameter::TextureWrapT, TextureWrap::ClampToEdge as i32);
+//  gl.tex_parameteri(TextureParameter::TextureMinFilter, TextureMinFilter::Nearest as i32);
+//  gl.tex_parameteri(TextureParameter::TextureMagFilter, TextureMagFilter::Nearest as i32);
+//
+//  gl.tex_image2d(TextureBindPoint::Texture2d, 0, 240, 180, PixelFormat::Rgba, DataType::U8, img.raw_pixels().as_slice());
 
-    // Compile the vertex shader
-    gl.compile_shader(&vert_shader);
+  let mut translation = Vector3::from((-150.0, 0.0, -660.0));
+  let mut scale = Vector3::from((1.0, 1.0, 1.0));
+  let mut angle = 0.0;
 
-    //fragment shader source code
-    let frag_code = "void main(void) {
-        gl_FragColor = vec4(1, 0.5, 0.0, 1);
-    }";
-    // Create fragment shader object
-    let frag_shader = gl.create_shader(ShaderKind::Fragment);
+  fn to_rad(angle: f32) -> f32 {
+    (360.0 - angle) * std::f32::consts::PI / 180.0
+  }
 
-    // Attach fragment shader source code
-    gl.shader_source(&frag_shader, frag_code);
+  let mut last = 0.0;
+  app.run(move |app: &mut App, t: f64| {
+    let t = t as f32;
+    let delta = (t - last) / 1000.0;
+    last = t;
 
-    // Compile the fragmentt shader
-    gl.compile_shader(&frag_shader);
+    angle = (angle + 10.0 * delta) % 360.0;
+    let radian_angle = Deg(angle);
 
-    // Create a shader program object to store
-    // the combined shader program
-    let shader_program = gl.create_program();
+    gl.viewport(0, 0, size.0, size.1);
 
-    // Attach a vertex shader
-    gl.attach_shader(&shader_program, &vert_shader);
-
-    // Attach a fragment shader
-    gl.attach_shader(&shader_program, &frag_shader);
-
-    // Link both the programs
-    gl.link_program(&shader_program);
-
-    // Use the combined shader program object
-    gl.use_program(&shader_program);
-
-    /*======= Associating shaders to buffer objects =======*/
-
-    // Bind vertex buffer object
-    gl.bind_buffer(BufferKind::Array, &vertex_buffer);
-
-    // Bind index buffer object
-    gl.bind_buffer(BufferKind::ElementArray, &index_buffer);
-
-    // Get the attribute location
-    let coord = gl.get_attrib_location(&shader_program, "coordinates".into())
-        .unwrap();
-
-    // Point an attribute to the currently bound VBO
-    gl.vertex_attrib_pointer(coord, AttributeSize::Three , DataType::Float, false, 0, 0);
-
-    // Enable the attribute
-    gl.enable_vertex_attrib_array(coord);
-
-    /*=========Drawing the triangle===========*/
-
-    // Clear the canvas
-    gl.clear_color(0.5, 0.5, 0.5, 0.9);
-
-    // Enable the depth test
-    gl.enable(Flag::DepthTest);
-
-    // Clear the color buffer bit
+    gl.clear_color(0.0, 0.0, 0.0, 0.0);
     gl.clear(BufferBit::Color);
     gl.clear(BufferBit::Depth);
 
-    // Set the view port
-    gl.viewport(0, 0, size.0, size.1);
+    gl.enable(Flag::CullFace);
+    gl.enable(Flag::DepthTest);
 
-    app.run(move |_t:&mut App| {
-        gl.clear(BufferBit::Color);
-        gl.clear(BufferBit::Depth);
-        gl.clear_color(1.0, 1.0, 1.0, 1.0);
-        gl.draw_elements(Primitives::Triangles, count, DataType::U16, 0);
-    });
+    gl.use_program(&program);
 
-    Ok(())
+    gl.bind_vertex_array(&vao);
+
+    let num_fs = 5;
+    let radius = 200.0;
+
+    let aspect = size.0 as f32 / size.1 as f32;
+
+    let f_pos = Point3::new(radius, 0.0, 0.0);
+
+    let projection_matrix = perspective(Deg(60.0), aspect, 1.0, 2000.0,);
+
+    let camera_matrix = Matrix4::from_angle_y(radian_angle) * Matrix4::from_translation(Vector3::new(0.0, 50.0, radius * 1.5));
+
+    let cam_pos = camera_matrix.transform_point(Point3::origin());
+
+    let view_matrix = Matrix4::look_at(cam_pos, f_pos, Vector3::unit_y());
+
+    let view_projection_matrix = projection_matrix * view_matrix;
+
+    for i in 0..num_fs {
+      let angle = i as f32 * ::std::f32::consts::PI * 2.0 / num_fs as f32;
+
+      let x = angle.cos() * radius;
+      let z = angle.sin() * radius;
+
+      let matrix = view_projection_matrix * Matrix4::from_translation(Vector3::new(x, 0.0, z));
+
+      u_matrix.set(&gl, matrix);
+
+      gl.draw_arrays(Primitives::Triangles, 16 * 6);
+    }
+  });
+
+  Ok(())
+}
+
+fn get_geometry() -> Vec<f32> {
+  let arr = [
+    // left column front
+    0.0,   0.0,  0.0,
+    0.0, 150.0,  0.0,
+    30.0,   0.0,  0.0,
+    0.0, 150.0,  0.0,
+    30.0, 150.0,  0.0,
+    30.0,   0.0,  0.0,
+
+    // top rung front
+    30.0,   0.0,  0.0,
+    30.0,  30.0,  0.0,
+    100.0,   0.0,  0.0,
+    30.0,  30.0,  0.0,
+    100.0,  30.0,  0.0,
+    100.0,   0.0,  0.0,
+
+    // middle rung front
+    30.0,  60.0,  0.0,
+    30.0,  90.0,  0.0,
+    67.0,  60.0,  0.0,
+    30.0,  90.0,  0.0,
+    67.0,  90.0,  0.0,
+    67.0,  60.0,  0.0,
+
+    // left column back
+    0.0,   0.0,  30.0,
+    30.0,   0.0,  30.0,
+    0.0, 150.0,  30.0,
+    0.0, 150.0,  30.0,
+    30.0,   0.0,  30.0,
+    30.0, 150.0,  30.0,
+
+    // top rung back
+    30.0,   0.0,  30.0,
+    100.0,   0.0,  30.0,
+    30.0,  30.0,  30.0,
+    30.0,  30.0,  30.0,
+    100.0,   0.0,  30.0,
+    100.0,  30.0,  30.0,
+
+    // middle rung back
+    30.0,  60.0,  30.0,
+    67.0,  60.0,  30.0,
+    30.0,  90.0,  30.0,
+    30.0,  90.0,  30.0,
+    67.0,  60.0,  30.0,
+    67.0,  90.0,  30.0,
+
+    // top
+    0.0,   0.0,   0.0,
+    100.0,   0.0,   0.0,
+    100.0,   0.0,  30.0,
+    0.0,   0.0,   0.0,
+    100.0,   0.0,  30.0,
+    0.0,   0.0,  30.0,
+
+    // top rung right
+    100.0,   0.0,   0.0,
+    100.0,  30.0,   0.0,
+    100.0,  30.0,  30.0,
+    100.0,   0.0,   0.0,
+    100.0,  30.0,  30.0,
+    100.0,   0.0,  30.0,
+
+    // under top rung
+    30.0,   30.0,   0.0,
+    30.0,   30.0,  30.0,
+    100.0,  30.0,  30.0,
+    30.0,   30.0,   0.0,
+    100.0,  30.0,  30.0,
+    100.0,  30.0,   0.0,
+
+    // between top rung and middle
+    30.0,   30.0,   0.0,
+    30.0,   60.0,  30.0,
+    30.0,   30.0,  30.0,
+    30.0,   30.0,   0.0,
+    30.0,   60.0,   0.0,
+    30.0,   60.0,  30.0,
+
+    // top of middle rung
+    30.0,   60.0,   0.0,
+    67.0,   60.0,  30.0,
+    30.0,   60.0,  30.0,
+    30.0,   60.0,   0.0,
+    67.0,   60.0,   0.0,
+    67.0,   60.0,  30.0,
+
+    // right of middle rung
+    67.0,   60.0,   0.0,
+    67.0,   90.0,  30.0,
+    67.0,   60.0,  30.0,
+    67.0,   60.0,   0.0,
+    67.0,   90.0,   0.0,
+    67.0,   90.0,  30.0,
+
+    // bottom of middle rung.
+    30.0,   90.0,   0.0,
+    30.0,   90.0,  30.0,
+    67.0,   90.0,  30.0,
+    30.0,   90.0,   0.0,
+    67.0,   90.0,  30.0,
+    67.0,   90.0,   0.0,
+
+    // right of bottom
+    30.0,   90.0,   0.0,
+    30.0,  150.0,  30.0,
+    30.0,   90.0,  30.0,
+    30.0,   90.0,   0.0,
+    30.0,  150.0,   0.0,
+    30.0,  150.0,  30.0,
+
+    // bottom
+    0.0,   150.0,   0.0,
+    0.0,   150.0,  30.0,
+    30.0,  150.0,  30.0,
+    0.0,   150.0,   0.0,
+    30.0,  150.0,  30.0,
+    30.0,  150.0,   0.0,
+
+    // left side
+    0.0,   0.0,   0.0,
+    0.0,   0.0,  30.0,
+    0.0, 150.0,  30.0,
+    0.0,   0.0,   0.0,
+    0.0, 150.0,  30.0,
+    0.0, 150.0,   0.0,
+  ];
+
+  let matrix = Matrix4::from_angle_x(Deg(180.0)) * Matrix4::from_translation(Vector3::new(-50.0, -75.0, -15.0));
+
+  let mut vec = Vec::<f32>::new();
+
+  for coord in arr.chunks(3) {
+    let out: [f32; 3] = matrix.transform_point([coord[0], coord[1], coord[2]].into()).into();
+    vec.extend_from_slice(&out);
+  }
+
+  vec
+}
+
+fn get_texcoords() -> &'static [f32] {
+  &[
+    // left column front
+    0.0, 0.0,
+    0.0, 1.0,
+    1.0, 0.0,
+    0.0, 1.0,
+    1.0, 1.0,
+    1.0, 0.0,
+
+    // top rung front
+    0.0, 0.0,
+    0.0, 1.0,
+    1.0, 0.0,
+    0.0, 1.0,
+    1.0, 1.0,
+    1.0, 0.0,
+
+    // middle rung front
+    0.0, 0.0,
+    0.0, 1.0,
+    1.0, 0.0,
+    0.0, 1.0,
+    1.0, 1.0,
+    1.0, 0.0,
+
+    // left column back
+    0.0, 0.0,
+    1.0, 0.0,
+    0.0, 1.0,
+    0.0, 1.0,
+    1.0, 0.0,
+    1.0, 1.0,
+
+    // top rung back
+    0.0, 0.0,
+    1.0, 0.0,
+    0.0, 1.0,
+    0.0, 1.0,
+    1.0, 0.0,
+    1.0, 1.0,
+
+    // middle rung back
+    0.0, 0.0,
+    1.0, 0.0,
+    0.0, 1.0,
+    0.0, 1.0,
+    1.0, 0.0,
+    1.0, 1.0,
+
+    // top
+    0.0, 0.0,
+    1.0, 0.0,
+    1.0, 1.0,
+    0.0, 0.0,
+    1.0, 1.0,
+    0.0, 1.0,
+
+    // top rung right
+    0.0, 0.0,
+    1.0, 0.0,
+    1.0, 1.0,
+    0.0, 0.0,
+    1.0, 1.0,
+    0.0, 1.0,
+
+    // under top rung
+    0.0, 0.0,
+    0.0, 1.0,
+    1.0, 1.0,
+    0.0, 0.0,
+    1.0, 1.0,
+    1.0, 0.0,
+
+    // between top rung and middle
+    0.0, 0.0,
+    1.0, 1.0,
+    0.0, 1.0,
+    0.0, 0.0,
+    1.0, 0.0,
+    1.0, 1.0,
+
+    // top of middle rung
+    0.0, 0.0,
+    1.0, 1.0,
+    0.0, 1.0,
+    0.0, 0.0,
+    1.0, 0.0,
+    1.0, 1.0,
+
+    // right of middle rung
+    0.0, 0.0,
+    1.0, 1.0,
+    0.0, 1.0,
+    0.0, 0.0,
+    1.0, 0.0,
+    1.0, 1.0,
+
+    // bottom of middle rung.
+    0.0, 0.0,
+    0.0, 1.0,
+    1.0, 1.0,
+    0.0, 0.0,
+    1.0, 1.0,
+    1.0, 0.0,
+
+    // right of bottom
+    0.0, 0.0,
+    1.0, 1.0,
+    0.0, 1.0,
+    0.0, 0.0,
+    1.0, 0.0,
+    1.0, 1.0,
+
+    // bottom
+    0.0, 0.0,
+    0.0, 1.0,
+    1.0, 1.0,
+    0.0, 0.0,
+    1.0, 1.0,
+    1.0, 0.0,
+
+    // left side
+    0.0, 0.0,
+    0.0, 1.0,
+    1.0, 1.0,
+    0.0, 0.0,
+    1.0, 1.0,
+    1.0, 0.0,
+  ]
+}
+
+fn set_colors(gl: &WebGL2RenderingContext) {
+  gl.buffer_data(BufferKind::Array, &[
+    // left column front
+    200,  70, 120,
+    200,  70, 120,
+    200,  70, 120,
+    200,  70, 120,
+    200,  70, 120,
+    200,  70, 120,
+
+    // top rung front
+    200,  70, 120,
+    200,  70, 120,
+    200,  70, 120,
+    200,  70, 120,
+    200,  70, 120,
+    200,  70, 120,
+
+    // middle rung front
+    200,  70, 120,
+    200,  70, 120,
+    200,  70, 120,
+    200,  70, 120,
+    200,  70, 120,
+    200,  70, 120,
+
+    // left column back
+    80, 70, 200,
+    80, 70, 200,
+    80, 70, 200,
+    80, 70, 200,
+    80, 70, 200,
+    80, 70, 200,
+
+    // top rung back
+    80, 70, 200,
+    80, 70, 200,
+    80, 70, 200,
+    80, 70, 200,
+    80, 70, 200,
+    80, 70, 200,
+
+    // middle rung back
+    80, 70, 200,
+    80, 70, 200,
+    80, 70, 200,
+    80, 70, 200,
+    80, 70, 200,
+    80, 70, 200,
+
+    // top
+    70, 200, 210,
+    70, 200, 210,
+    70, 200, 210,
+    70, 200, 210,
+    70, 200, 210,
+    70, 200, 210,
+
+    // top rung right
+    200, 200, 70,
+    200, 200, 70,
+    200, 200, 70,
+    200, 200, 70,
+    200, 200, 70,
+    200, 200, 70,
+
+    // under top rung
+    210, 100, 70,
+    210, 100, 70,
+    210, 100, 70,
+    210, 100, 70,
+    210, 100, 70,
+    210, 100, 70,
+
+    // between top rung and middle
+    210, 160, 70,
+    210, 160, 70,
+    210, 160, 70,
+    210, 160, 70,
+    210, 160, 70,
+    210, 160, 70,
+
+    // top of middle rung
+    70, 180, 210,
+    70, 180, 210,
+    70, 180, 210,
+    70, 180, 210,
+    70, 180, 210,
+    70, 180, 210,
+
+    // right of middle rung
+    100, 70, 210,
+    100, 70, 210,
+    100, 70, 210,
+    100, 70, 210,
+    100, 70, 210,
+    100, 70, 210,
+
+    // bottom of middle rung.
+    76, 210, 100,
+    76, 210, 100,
+    76, 210, 100,
+    76, 210, 100,
+    76, 210, 100,
+    76, 210, 100,
+
+    // right of bottom
+    140, 210, 80,
+    140, 210, 80,
+    140, 210, 80,
+    140, 210, 80,
+    140, 210, 80,
+    140, 210, 80,
+
+    // bottom
+    90, 130, 110,
+    90, 130, 110,
+    90, 130, 110,
+    90, 130, 110,
+    90, 130, 110,
+    90, 130, 110,
+
+    // left side
+    160, 160, 220,
+    160, 160, 220,
+    160, 160, 220,
+    160, 160, 220,
+    160, 160, 220,
+    160, 160, 220,
+  ], DrawMode::Static)
 }

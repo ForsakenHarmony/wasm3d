@@ -2,8 +2,20 @@
 name = "wasm3d"
 version = "0.1.0"
 authors = ["Leah <me@hrmny.pw>"]
+build = "build.rs"
 
 [dependencies]
-webgl = { path = "webgl-rs" }
-application = { path = "application-rs" }
-stdweb = "0.4.6"
+stdweb = "0.4"
+stdweb-derive = "0.4"
+serde = "1.0"
+serde_derive = "1.0"
+rand = { version ="0.5", features=["stdweb"] }
+cgmath = "0.16"
+
+[dependencies.image]
+version = "0.19"
+default-features = false
+features = ["png_codec", "tga", "jpeg"]
+
+[build-dependencies]
+webgl_generator = "0.1.0"
