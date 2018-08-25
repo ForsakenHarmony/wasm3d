@@ -26,22 +26,22 @@ pub struct App {
 use super::events;
 
 macro_rules! map_event {
-    ($events:expr, $x:ident, $y:ident, $ee:ident, $e:expr, $prevent:expr) => {{
-        let events = $events.clone();
-        move |$ee: $x| {
-            if $prevent {
-                $ee.prevent_default();
-            }
-            events.borrow_mut().push(AppEvent::$y($e));
-        }
-    }};
+  ($events:expr, $x:ident, $y:ident, $ee:ident, $e:expr, $prevent:expr) => {{
+    let events = $events.clone();
+    move |$ee: $x| {
+      if $prevent {
+        $ee.prevent_default();
+      }
+      events.borrow_mut().push(AppEvent::$y($e));
+    }
+  }};
 
-    ($events:expr, $x:ident, $y:ident, $e:expr) => {{
-        let events = $events.clone();
-        move |_: $x| {
-            events.borrow_mut().push(AppEvent::$y($e));
-        }
-    }};
+  ($events:expr, $x:ident, $y:ident, $e:expr) => {{
+    let events = $events.clone();
+    move |_: $x| {
+      events.borrow_mut().push(AppEvent::$y($e));
+    }
+  }};
 }
 
 // In browser request full screen can only called under event handler.
@@ -49,17 +49,17 @@ macro_rules! map_event {
 #[allow(dead_code)]
 fn request_full_screen(canvas: &CanvasElement) {
   js! {
-        var c = @{&canvas};
-        if (c.requestFullscreen) {
-            c.requestFullscreen();
-        } else if (c.webkitRequestFullscreen) {
-            c.webkitRequestFullscreen(Element.ALLOW_KEYBOARD_INPUT);
-        } else if (c.mozRequestFullScreen) {
-            c.mozRequestFullScreen();
-        } else if (c.msRequestFullscreen) {
-            c.msRequestFullscreen();
-        }
-    };
+      var c = @{&canvas};
+      if (c.requestFullscreen) {
+          c.requestFullscreen();
+      } else if (c.webkitRequestFullscreen) {
+          c.webkitRequestFullscreen(Element.ALLOW_KEYBOARD_INPUT);
+      } else if (c.mozRequestFullScreen) {
+          c.mozRequestFullScreen();
+      } else if (c.msRequestFullscreen) {
+          c.msRequestFullscreen();
+      }
+  };
 }
 
 impl App {
@@ -72,10 +72,10 @@ impl App {
     }
 
     let canvas: CanvasElement = document()
-        .create_element("canvas")
-        .unwrap()
-        .try_into()
-        .unwrap();
+      .create_element("canvas")
+      .unwrap()
+      .try_into()
+      .unwrap();
 
     js! {@(no_return)
       // setup the buffer size
@@ -157,11 +157,11 @@ impl App {
     canvas.add_event_listener({
       let canvas = canvas.clone();
       let canvas_x: f64 = js! { return @{&canvas}.getBoundingClientRect().left; }
-          .try_into()
-          .unwrap();
+        .try_into()
+        .unwrap();
       let canvas_y: f64 = js! { return @{&canvas}.getBoundingClientRect().top; }
-          .try_into()
-          .unwrap();
+        .try_into()
+        .unwrap();
       map_event! {
         self.events,
         MouseMoveEvent,
@@ -242,8 +242,8 @@ impl App {
   }
 
   pub fn run_loop<F>(mut self, mut callback: F)
-    where
-        F: 'static + FnMut(&mut Self, f64) -> (),
+  where
+    F: 'static + FnMut(&mut Self, f64) -> (),
   {
     window().request_animation_frame(move |t: f64| {
       callback(&mut self, t);
@@ -253,8 +253,8 @@ impl App {
   }
 
   pub fn poll_events<F>(&mut self, callback: F) -> bool
-    where
-        F: FnOnce(&mut Self) -> (),
+  where
+    F: FnOnce(&mut Self) -> (),
   {
     callback(self);
     self.events.borrow_mut().clear();
@@ -263,8 +263,8 @@ impl App {
   }
 
   pub fn run<F>(self, callback: F)
-    where
-        F: 'static + FnMut(&mut Self, f64) -> (),
+  where
+    F: 'static + FnMut(&mut Self, f64) -> (),
   {
     self.run_loop(callback);
   }

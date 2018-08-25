@@ -11,6 +11,7 @@ serde = "1.0"
 serde_derive = "1.0"
 rand = { version ="0.5", features=["stdweb"] }
 cgmath = "0.16"
+console_error_panic_hook = "0.1"
 
 [dependencies.image]
 version = "0.19"

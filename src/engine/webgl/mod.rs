@@ -3,12 +3,12 @@ pub mod glenum;
 pub use glenum::*;
 
 use std::ops::Deref;
-use stdweb::Reference;
-use stdweb::InstanceOf;
 use stdweb::unstable::{TryFrom, TryInto};
-use stdweb::web::*;
-use stdweb::UnsafeTypedArray;
 use stdweb::web::html_element::CanvasElement;
+use stdweb::web::*;
+use stdweb::InstanceOf;
+use stdweb::Reference;
+use stdweb::UnsafeTypedArray;
 
 #[derive(Debug, Clone, ReferenceType)]
 #[reference(instance_of = "WebGL2RenderingContext")]
@@ -97,13 +97,13 @@ impl WebGL2RenderingContext {
     }
   }
 
-  pub fn buffer_data(&self, kind: BufferKind, data: &[u8], draw: DrawMode) {
+  pub fn buffer_data_bytes(&self, kind: BufferKind, data: &[u8], draw: DrawMode) {
     js! {@(no_return)
       (@{&self}).bufferData(@{kind as u32},@{ TypedArray::from(data) }, @{draw as u32});
     };
   }
 
-  pub fn buffer_data_float(&self, kind: BufferKind, data: &[f32], draw: DrawMode) {
+  pub fn buffer_data(&self, kind: BufferKind, data: &[f32], draw: DrawMode) {
     js! {@(no_return)
       (@{&self}).bufferData(@{kind as u32},@{ TypedArray::from(data) }, @{draw as u32});
     };
@@ -199,10 +199,7 @@ impl WebGL2RenderingContext {
       const res = (@{self}).getUniformLocation(@{program.deref()},@{name});
       return res;
     };
-    value
-        .try_into()
-        .ok()
-        .map(WebGLUniformLocation)
+    value.try_into().ok().map(WebGLUniformLocation)
   }
 
   pub fn vertex_attrib_pointer(
@@ -460,8 +457,7 @@ impl WebGL2RenderingContext {
   }
 
   pub fn get_active_uniform(&self, program: &WebGLProgram, location: u32) -> WebGLActiveInfo {
-    let res =
-      js! { return @{self}.getActiveUniform(@{program.deref()},@{location}) };
+    let res = js! { return @{self}.getActiveUniform(@{program.deref()},@{location}) };
     let name = js! { return @{&res}.name };
     let size = js! { return @{&res}.size };
     let kind = js! { return @{&res}.type };
@@ -476,8 +472,7 @@ impl WebGL2RenderingContext {
   }
 
   pub fn get_active_attrib(&self, program: &WebGLProgram, location: u32) -> WebGLActiveInfo {
-    let res =
-      js! { return @{self}.getActiveAttrib(@{program.deref()},@{location}) };
+    let res = js! { return @{self}.getActiveAttrib(@{program.deref()},@{location}) };
     let name = js! { return @{&res}.name };
     let size = js! { return @{&res}.size };
     let kind = js! { return @{&res}.type };

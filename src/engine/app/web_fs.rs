@@ -1,9 +1,9 @@
 use std;
-use stdweb::web::TypedArray;
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::io::ErrorKind;
+use std::rc::Rc;
 use std::str;
+use stdweb::web::TypedArray;
 
 pub type IoError = std::io::Error;
 
@@ -59,9 +59,7 @@ impl FileSystem {
         });
     }
 
-    Ok(File {
-      buffer_state,
-    })
+    Ok(File { buffer_state })
   }
 }
 
