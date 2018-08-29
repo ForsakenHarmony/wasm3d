@@ -2,7 +2,6 @@
 name = "wasm3d"
 version = "0.1.0"
 authors = ["Leah <me@hrmny.pw>"]
-build = "build.rs"
 
 [dependencies]
 stdweb = "0.4"
@@ -11,7 +10,6 @@ serde = "1.0"
 serde_derive = "1.0"
 rand = { version ="0.5", features=["stdweb"] }
 cgmath = "0.16"
-console_error_panic_hook = "0.1"
 
 [dependencies.image]
 version = "0.19"

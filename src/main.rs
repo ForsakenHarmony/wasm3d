@@ -3,8 +3,6 @@
 // FIXME: remove this
 #![allow(unused, unused_mut, dead_code)]
 
-extern crate console_error_panic_hook;
-
 #[macro_use]
 extern crate stdweb;
 #[macro_use]
@@ -65,21 +63,22 @@ impl VBO {
   pub fn set_data(&self, data: &[f32]) {
     self.gl.bind_buffer(BufferKind::Array, &self.buffer);
     self
-      .gl
-      .buffer_data(BufferKind::Array, data, DrawMode::Static);
+        .gl
+        .buffer_data(BufferKind::Array, data, DrawMode::Static);
   }
 
   pub fn set_data_bytes(&self, data: &[u8]) {
     self.gl.bind_buffer(BufferKind::Array, &self.buffer);
     self
-      .gl
-      .buffer_data_bytes(BufferKind::Array, data, DrawMode::Static);
+        .gl
+        .buffer_data_bytes(BufferKind::Array, data, DrawMode::Static);
   }
 }
 
 struct ShaderProgram {
   program: WebGLProgram,
   gl: Rc<WebGL2RenderingContext>,
+  u_matrix: MatrixUniform,
 }
 
 impl ShaderProgram {
@@ -92,7 +91,10 @@ impl ShaderProgram {
     let frag_shader = create_shader(&gl, ShaderKind::Fragment, frag_code);
     let program = create_program(&gl, &vert_shader, &frag_shader);
 
-    ShaderProgram { program, gl }
+    let location = gl.get_uniform_location(&program, "u_matrix").unwrap();
+    let u_matrix = MatrixUniform::new(Rc::clone(&gl), location);
+
+    ShaderProgram { program, gl, u_matrix }
   }
 
   pub fn create_vertex_array(&self) -> WebGLVertexArrayObject {
@@ -108,15 +110,15 @@ impl ShaderProgram {
     data_type: DataType,
   ) -> VBO {
     let loc = self
-      .gl
-      .get_attrib_location(&self.program, attribute)
-      .unwrap();
+        .gl
+        .get_attrib_location(&self.program, attribute)
+        .unwrap();
     let buffer = self.gl.create_buffer();
     self.gl.bind_buffer(BufferKind::Array, &buffer);
     self.gl.enable_vertex_attrib_array(loc);
     self
-      .gl
-      .vertex_attrib_pointer(loc, size, data_type, false, 0, 0);
+        .gl
+        .vertex_attrib_pointer(loc, size, data_type, false, 0, 0);
     self.gl.unbind_buffer(BufferKind::Array);
     VBO::new(Rc::clone(&self.gl), buffer)
   }
@@ -188,53 +190,55 @@ impl Uniform for MatrixUniform {
   }
 }
 
-fn create_and_bind_buffer(
-  gl: &WebGL2RenderingContext,
-  size: AttributeSize,
-  data: &[f32],
-  loc: u32,
-) -> WebGLBuffer {
-  let buffer = gl.create_buffer();
-  gl.bind_buffer(BufferKind::Array, &buffer);
-  gl.buffer_data(BufferKind::Array, data, DrawMode::Static);
-  gl.enable_vertex_attrib_array(loc);
-  gl.vertex_attrib_pointer(loc, size, DataType::Float, false, 0, 0);
-  buffer
-}
-
 struct Camera {
   proj: Matrix4<f32>,
   view: Matrix4<f32>,
+  pos: Point3<f32>,
+  view_proj: Matrix4<f32>,
 }
 
 impl Camera {
-  fn perspective(fov: Deg<f32>, aspect: f32, near: f32, far: f32, view: Matrix4<f32>) -> Self {
-    let projection_matrix = perspective(Deg(60.0), aspect, 1.0, 2000.0);
+  pub fn perspective(fov: Deg<f32>, aspect: f32, near: f32, far: f32, pos: Point3<f32>) -> Self {
+    let proj = perspective(fov, aspect, near, far);
+    let view = Matrix4::look_at(pos, Point3::origin(), Vector3::unit_y());
+    let view_proj = proj * view;
 
     Camera {
-      proj: perspective(fov, aspect, near, far),
+      proj,
+      pos,
       view,
+      view_proj,
     }
+  }
+
+  pub fn look_at(&mut self, target: Point3<f32>) {
+    self.view = Matrix4::look_at(self.pos, target, Vector3::unit_y());
+  }
+
+  pub fn set_pos(&mut self, pos: Point3<f32>) {
+    self.pos = pos;
+  }
+
+  pub fn update(&mut self) {
+    self.view_proj = self.proj * self.view;
   }
 }
 
 struct Renderer {
-  gl: WebGL2RenderingContext,
-  program: WebGLProgram,
+  gl: Rc<WebGL2RenderingContext>,
+  program: ShaderProgram,
   camera: Camera,
   size: (u32, u32),
 }
 
 impl Renderer {
   pub fn new(
-    gl: WebGL2RenderingContext,
+    gl: Rc<WebGL2RenderingContext>,
     vert_code: &'static str,
     frag_code: &'static str,
     camera: Camera,
   ) -> Self {
-    let vert_shader = create_shader(&gl, ShaderKind::Vertex, vert_code);
-    let frag_shader = create_shader(&gl, ShaderKind::Fragment, frag_code);
-    let program = create_program(&gl, &vert_shader, &frag_shader);
+    let program = ShaderProgram::new(Rc::clone(&gl), vert_code, frag_code);
 
     Renderer {
       gl,
@@ -244,141 +248,91 @@ impl Renderer {
     }
   }
 
+  pub fn create_mesh<V: VertexFormat>(&self, vertices: Vec<V>, indices: Option<Vec<u16>>) -> Mesh<V> {
+    Mesh::new(&self.program, vertices, indices)
+  }
+
   fn start(&self) {
-    self.gl.use_program(&self.program);
+    self.program.use_program();
+  }
+
+  pub fn render_mesh<V: VertexFormat>(&mut self, mesh: &Mesh<V>, translation: Vector3<f32>) {
+    self.gl.bind_vertex_array(&mesh.vao);
+
+    self.program.u_matrix.set(self.camera.view_proj * Matrix4::from_translation(translation));
+
+    self.gl.draw_arrays(Primitives::Triangles,  mesh.vertices.len());
   }
 }
 
-trait VertexFormat {}
+trait VertexFormat {
+  type Buffers;
+
+  fn create_buffers(program: &ShaderProgram, vertices: &Vec<Self>) -> Self::Buffers where Self: std::marker::Sized;
+}
 
 struct VertexPosTex {
   pos: [f32; 3],
   tex: [f32; 2],
 }
-impl VertexFormat for VertexPosTex {}
+
+impl VertexFormat for VertexPosTex {
+  type Buffers = (VBO, VBO);
+
+  fn create_buffers(program: &ShaderProgram, vertices: &Vec<Self>) -> Self::Buffers {
+    let pos_buffer = program.create_buffer(AttributeSize::Three, "a_position", DataType::Float);
+    let tex_buffer = program.create_buffer(AttributeSize::Two, "a_texcoord", DataType::Float);
+
+    let (positions, tex_coords) = vertices.iter().fold((Vec::new(), Vec::new()), |(mut pos, mut tex), val| {
+      pos.extend_from_slice(&val.pos);
+      tex.extend_from_slice(&val.tex);
+      (pos, tex)
+    });
+
+    pos_buffer.set_data(positions.as_slice());
+    tex_buffer.set_data(tex_coords.as_slice());
+
+    (pos_buffer, tex_buffer)
+  }
+}
 
 struct Mesh<V: VertexFormat> {
   vertices: Vec<V>,
   indices: Vec<u16>,
+  vao: WebGLVertexArrayObject,
+  buffers: V::Buffers,
 }
 
 impl<V: VertexFormat> Mesh<V> {
-  pub fn new(vertices: Vec<V>, indices: Vec<u16>) -> Self {
-    Mesh { vertices, indices }
-  }
+  pub fn new(program: &ShaderProgram, vertices: Vec<V>, indices: Option<Vec<u16>>) -> Self {
+    let indices = indices.unwrap_or((0u16..vertices.len() as u16 - 1u16).collect());
 
-  pub fn new_no_indices(vertices: Vec<V>) -> Self {
-    let indices = (0u16..vertices.len() as u16 - 1u16).collect();
+    let vao = program.create_vertex_array();
+    let buffers = V::create_buffers(program, &vertices);
 
-    Mesh { vertices, indices }
+    Mesh {
+      vertices,
+      indices,
+      vao,
+      buffers,
+    }
   }
 }
-
-struct GpuMesh {}
 
 struct App {
   renderer: Renderer,
   gl: Rc<WebGL2RenderingContext>,
 }
 
-// impl App {
-//   pub fn new(gl: WebGL2RenderingContext) -> Self {
-//     App {
-//       gl: Rc::new(gl),
-//     }
-//   }
-// }
-
-// trait State {
-//   fn update(&mut self, events: Vec<AppEvent>) -> StateChange;
-//   fn render(&mut self, renderer: &Renderer);
-// }
-
-// enum StateChange {
-//   Pop,
-//   Push(Box<State>),
-//   Replace(Box<State>),
-//   None
-// }
-
-// struct AssetLoader {
-//   assets: Vec<(&'static str, Vec<u8>)>,
-// }
-
-// impl AssetLoader {
-//   pub fn new(assets: &[&str]) -> Self {
-//     AssetLoader {
-//       assets: assets.iter().map(|path| FileSystem::open(path)).collect()
-//     }
-//   }
-// }
-
-// impl State for AssetLoader {
-//   fn update(&mut self, _: Vec<AppEvent>) -> StateChange {
-
-//   }
-
-//   fn render(&mut self, _: &Renderer) {}
-// }
-
-// struct Context<'a> {
-//   renderer: &'a Renderer,
-//   app: &'a App,
-//   delta: f32,
-// }
-
-// struct App {
-//   stack: Vec<Box<State>>,
-//   assets: HashMap<&'static str, Vec<u8>>,
-//   renderer: Renderer,
-// }
-
-// impl App {
-//   pub fn new(renderer: Renderer, initial_state: State, assets: &[&'static str]) -> Self {
-//     let stack = Vec::new();
-//     stack.push(initial_state);
-
-//     if assets.len() > 0 {
-//       stack.push(AssetLoader::new(assets));
-//     }
-
-//     App {
-//       stack,
-//       assets: HashMap::new(),
-//       renderer,
-//     }
-//   }
-
-//   pub fn run(&mut self) {
-
-//   }
-
-//   // return is "should continue"
-//   fn update(&mut self) -> bool {
-//     let state = self.stack.last().expect("at this point we should always at least have one state");
-//     match state.update(&self.renderer) {
-//       Pop => {
-//         self.stack.pop();
-//         if self.stack.len() == 0 {
-//           return false,
-//         }
-//       },
-//       Push(state) => {
-//         self.stack.push(state);
-//       },
-//       Replace(state) => {
-//         self.stack.pop();
-//         self.stack.push(state);
-//       }
-//       None => {},
-//     }
-//     true
-//   }
-// }
+fn panic_hook(info: &std::panic::PanicInfo) {
+  js! {@(no_return)
+    console.error(@{info.to_string()});
+  }
+}
 
 #[cfg(target_arch = "wasm32")]
 pub fn main() -> Result<(), Box<std::error::Error>> {
-  panic::set_hook(Box::new(console_error_panic_hook::hook));
+  std::panic::set_hook(Box::new(panic_hook));
 
   let thing = 3;
 
@@ -391,18 +345,32 @@ pub fn main() -> Result<(), Box<std::error::Error>> {
   let gl = WebGL2RenderingContext::new(app.canvas());
   let gl = Rc::new(gl);
 
+  let aspect = size.0 as f32 / size.1 as f32;
+
   let vert_code = include_str!("../shaders/vert.glsl");
   let frag_code = include_str!("../shaders/frag.glsl");
 
-  let shader_program = ShaderProgram::new(Rc::clone(&gl), vert_code, frag_code);
-  let vao = shader_program.create_vertex_array();
-  let pos_buffer =
-    shader_program.create_buffer(AttributeSize::Three, "a_position", DataType::Float);
-  let tex_buffer = shader_program.create_buffer(AttributeSize::Two, "a_texcoord", DataType::Float);
-  let u_matrix = shader_program.create_uniform::<MatrixUniform>("u_matrix");
+  let camera = Camera::perspective(Deg(60.0), aspect, 1.0, 2000.0, Point3::origin());
+  let mut renderer = Renderer::new(Rc::clone(&gl), vert_code, frag_code, camera);
 
-  pos_buffer.set_data(get_geometry().as_slice());
-  tex_buffer.set_data(get_texcoords());
+  let vertices = get_geometry().chunks(3).zip(get_texcoords().chunks(2)).map(|(geom, tex)| {
+    VertexPosTex {
+      pos: [geom[0], geom[1], geom[2]],
+      tex: [tex[0], tex[1]],
+    }
+  }).collect();
+
+  let f = renderer.create_mesh(vertices, None);
+
+//  let shader_program = ShaderProgram::new(Rc::clone(&gl), vert_code, frag_code);
+//  let vao = shader_program.create_vertex_array();
+//  let pos_buffer =
+//    shader_program.create_buffer(AttributeSize::Three, "a_position", DataType::Float);
+//  let tex_buffer = shader_program.create_buffer(AttributeSize::Two, "a_texcoord", DataType::Float);
+//  let u_matrix = shader_program.create_uniform::<MatrixUniform>("u_matrix");
+//
+//  pos_buffer.set_data(get_geometry().as_slice());
+//  tex_buffer.set_data(get_texcoords());
 
   // look up data locations
   // let pos_attr_loc = gl.get_attrib_location(&program, "a_position").unwrap();
@@ -413,34 +381,7 @@ pub fn main() -> Result<(), Box<std::error::Error>> {
   // look up uniforms
   //  let matrix_loc = gl.get_uniform_location(&program, "u_matrix").unwrap();
 
-  // let vao = gl.create_vertex_array();
-  // gl.bind_vertex_array(&vao);
-
-  // create_and_bind_buffer(&gl, AttributeSize::Three, get_geometry().as_slice(), pos_attr_loc);
-  // create_and_bind_buffer(&gl, AttributeSize::Two, get_texcoords(), tex_coord_loc);
-
-  //  let pos_buffer = gl.create_buffer();
-  //  gl.bind_buffer(BufferKind::Array, &pos_buffer);
-  //  gl.buffer_data_float(BufferKind::Array, get_geometry(), DrawMode::Static);
-  //  gl.enable_vertex_attrib_array(pos_attr_loc);
-  //  gl.vertex_attrib_pointer(pos_attr_loc, AttributeSize::Three, DataType::Float, false, 0, 0);
-  //
-  //  let tex_coord_buffer = gl.create_buffer();
-  //  gl.bind_buffer(BufferKind::Array, &tex_coord_buffer);
-  //  gl.buffer_data_float(BufferKind::Array, get_texcoords(), DrawMode::Static);
-  //  gl.enable_vertex_attrib_array(tex_coord_loc);
-  //  gl.vertex_attrib_pointer(tex_coord_loc, AttributeSize::Two, DataType::Float, false, 0, 0);
-
   let texture = create_texture(&gl, img.0, img.1, img.2.as_slice());
-
-  //  let texture = gl.create_texture();
-  //  gl.active_texture(TextureIndex::Texture0);
-  //  gl.bind_texture(&texture);
-  //
-  //  gl.tex_parameteri(TextureParameter::TextureWrapS, TextureWrap::ClampToEdge as i32);
-  //  gl.tex_parameteri(TextureParameter::TextureWrapT, TextureWrap::ClampToEdge as i32);
-  //
-  //  gl.tex_image2d(TextureBindPoint::Texture2d, 0, 240, 180, PixelFormat::Rgba, DataType::U8, img.raw_pixels().as_slice());
 
   let mut translation = Vector3::from((-150.0, 0.0, -660.0));
   let mut scale = Vector3::from((1.0, 1.0, 1.0));
@@ -468,11 +409,7 @@ pub fn main() -> Result<(), Box<std::error::Error>> {
     gl.enable(Flag::CullFace);
     gl.enable(Flag::DepthTest);
 
-    shader_program.use_program();
-
-    // gl.use_program(&program);
-
-    gl.bind_vertex_array(&vao);
+    renderer.start();
 
     let num_fs = 5;
     let radius = 200.0;
@@ -484,13 +421,12 @@ pub fn main() -> Result<(), Box<std::error::Error>> {
     let projection_matrix = perspective(Deg(60.0), aspect, 1.0, 2000.0);
 
     let camera_matrix = Matrix4::from_angle_y(radian_angle)
-      * Matrix4::from_translation(Vector3::new(0.0, 50.0, radius * 1.5));
-
+        * Matrix4::from_translation(Vector3::new(0.0, 50.0, radius * 1.5));
     let cam_pos = camera_matrix.transform_point(Point3::origin());
 
-    let view_matrix = Matrix4::look_at(cam_pos, f_pos, Vector3::unit_y());
-
-    let view_projection_matrix = projection_matrix * view_matrix;
+    renderer.camera.set_pos(cam_pos);
+    renderer.camera.look_at(f_pos);
+    renderer.camera.update();
 
     for i in 0..num_fs {
       let angle = i as f32 * ::std::f32::consts::PI * 2.0 / num_fs as f32;
@@ -498,11 +434,13 @@ pub fn main() -> Result<(), Box<std::error::Error>> {
       let x = angle.cos() * radius;
       let z = angle.sin() * radius;
 
-      let matrix = view_projection_matrix * Matrix4::from_translation(Vector3::new(x, 0.0, z));
+//      let matrix = view_projection_matrix * Matrix4::from_translation(Vector3::new(x, 0.0, z));
+//
+//      u_matrix.set(matrix);
 
-      u_matrix.set(matrix);
+      renderer.render_mesh(&f, Vector3::new(x, 0.0, z));
 
-      gl.draw_arrays(Primitives::Triangles, 16 * 6);
+//      gl.draw_arrays(Primitives::Triangles, 16 * 6);
     }
   });
 
@@ -510,15 +448,14 @@ pub fn main() -> Result<(), Box<std::error::Error>> {
 }
 
 fn get_geometry() -> Vec<f32> {
-
   let arr = [
     // left column front
-    0.0,  0.0,   0.0,
-    0.0,  150.0, 0.0,
-    30.0, 0.0,   0.0,
-    0.0,  150.0, 0.0,
+    0.0, 0.0, 0.0,
+    0.0, 150.0, 0.0,
+    30.0, 0.0, 0.0,
+    0.0, 150.0, 0.0,
     30.0, 150.0, 0.0,
-    30.0, 0.0,   0.0,
+    30.0, 0.0, 0.0,
     // top rung front
     30.0, 0.0, 0.0, 30.0, 30.0, 0.0, 100.0, 0.0, 0.0, 30.0, 30.0, 0.0, 100.0, 30.0, 0.0, 100.0,
     0.0, 0.0, // middle rung front
@@ -553,14 +490,14 @@ fn get_geometry() -> Vec<f32> {
   ];
 
   let matrix = Matrix4::from_angle_x(Deg(180.0))
-    * Matrix4::from_translation(Vector3::new(-50.0, -75.0, -15.0));
+      * Matrix4::from_translation(Vector3::new(-50.0, -75.0, -15.0));
 
   let mut vec = Vec::<f32>::new();
 
   for coord in arr.chunks(3) {
     let out: [f32; 3] = matrix
-      .transform_point([coord[0], coord[1], coord[2]].into())
-      .into();
+        .transform_point([coord[0], coord[1], coord[2]].into())
+        .into();
     vec.extend_from_slice(&out);
   }
 
