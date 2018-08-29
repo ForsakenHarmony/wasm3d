@@ -10,6 +10,8 @@ use stdweb::InstanceOf;
 use stdweb::Reference;
 use stdweb::UnsafeTypedArray;
 
+use std::ops::{Add, Sub, Mul, Div};
+
 #[derive(Debug, Clone, ReferenceType)]
 #[reference(instance_of = "WebGL2RenderingContext")]
 pub struct WebGL2RenderingContext(Reference);
@@ -97,15 +99,21 @@ impl WebGL2RenderingContext {
     }
   }
 
-  pub fn buffer_data_bytes(&self, kind: BufferKind, data: &[u8], draw: DrawMode) {
+  pub fn buffer_data_u8(&self, kind: BufferKind, data: &[u8], draw: DrawMode) {
     js! {@(no_return)
-      (@{&self}).bufferData(@{kind as u32},@{ TypedArray::from(data) }, @{draw as u32});
+      (@{&self}).bufferData(@{kind as u32},@{ unsafe { UnsafeTypedArray::new(data) } }, @{draw as u32});
     };
   }
 
-  pub fn buffer_data(&self, kind: BufferKind, data: &[f32], draw: DrawMode) {
+  pub fn buffer_data_u16(&self, kind: BufferKind, data: &[u16], draw: DrawMode) {
     js! {@(no_return)
-      (@{&self}).bufferData(@{kind as u32},@{ TypedArray::from(data) }, @{draw as u32});
+      (@{&self}).bufferData(@{kind as u32},@{ unsafe { UnsafeTypedArray::new(data) } }, @{draw as u32});
+    };
+  }
+
+  pub fn buffer_data_f32(&self, kind: BufferKind, data: &[f32], draw: DrawMode) {
+    js! {@(no_return)
+      (@{&self}).bufferData(@{kind as u32},@{ unsafe { UnsafeTypedArray::new(data) } }, @{draw as u32});
     };
   }
 

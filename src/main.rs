@@ -64,14 +64,14 @@ impl VBO {
     self.gl.bind_buffer(BufferKind::Array, &self.buffer);
     self
         .gl
-        .buffer_data(BufferKind::Array, data, DrawMode::Static);
+        .buffer_data_f32(BufferKind::Array, data, DrawMode::Static);
   }
 
   pub fn set_data_bytes(&self, data: &[u8]) {
     self.gl.bind_buffer(BufferKind::Array, &self.buffer);
     self
         .gl
-        .buffer_data_bytes(BufferKind::Array, data, DrawMode::Static);
+        .buffer_data_u8(BufferKind::Array, data, DrawMode::Static);
   }
 }
 
@@ -261,7 +261,11 @@ impl Renderer {
 
     self.program.u_matrix.set(self.camera.view_proj * Matrix4::from_translation(translation));
 
-    self.gl.draw_arrays(Primitives::Triangles,  mesh.vertices.len());
+    self.gl.bind_buffer(BufferKind::ElementArray, &mesh.index_buffer);
+
+    self.gl.draw_elements(Primitives::Triangles, mesh.vertices.len(), DataType::U16, 0);
+
+//    self.gl.draw_arrays(Primitives::Triangles, mesh.vertices.len());
   }
 }
 
@@ -301,20 +305,26 @@ struct Mesh<V: VertexFormat> {
   indices: Vec<u16>,
   vao: WebGLVertexArrayObject,
   buffers: V::Buffers,
+  index_buffer: WebGLBuffer,
 }
 
 impl<V: VertexFormat> Mesh<V> {
   pub fn new(program: &ShaderProgram, vertices: Vec<V>, indices: Option<Vec<u16>>) -> Self {
-    let indices = indices.unwrap_or((0u16..vertices.len() as u16 - 1u16).collect());
+    let indices = indices.unwrap_or((0u16..vertices.len() as u16).collect());
 
     let vao = program.create_vertex_array();
     let buffers = V::create_buffers(program, &vertices);
+
+    let index_buffer = program.gl.create_buffer();
+    program.gl.bind_buffer(BufferKind::ElementArray, &index_buffer);
+    program.gl.buffer_data_u16(BufferKind::ElementArray, indices.as_slice(), DrawMode::Static);
 
     Mesh {
       vertices,
       indices,
       vao,
       buffers,
+      index_buffer,
     }
   }
 }
@@ -527,42 +537,42 @@ fn get_texcoords() -> &'static [f32] {
   ]
 }
 
-fn set_colors(gl: &WebGL2RenderingContext) {
-  gl.buffer_data_bytes(
-    BufferKind::Array,
-    &[
-      // left column front
-      200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120,
-      // top rung front
-      200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120,
-      // middle rung front
-      200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120,
-      // left column back
-      80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200,
-      // top rung back
-      80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200,
-      // middle rung back
-      80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, // top
-      70, 200, 210, 70, 200, 210, 70, 200, 210, 70, 200, 210, 70, 200, 210, 70, 200, 210,
-      // top rung right
-      200, 200, 70, 200, 200, 70, 200, 200, 70, 200, 200, 70, 200, 200, 70, 200, 200, 70,
-      // under top rung
-      210, 100, 70, 210, 100, 70, 210, 100, 70, 210, 100, 70, 210, 100, 70, 210, 100, 70,
-      // between top rung and middle
-      210, 160, 70, 210, 160, 70, 210, 160, 70, 210, 160, 70, 210, 160, 70, 210, 160, 70,
-      // top of middle rung
-      70, 180, 210, 70, 180, 210, 70, 180, 210, 70, 180, 210, 70, 180, 210, 70, 180, 210,
-      // right of middle rung
-      100, 70, 210, 100, 70, 210, 100, 70, 210, 100, 70, 210, 100, 70, 210, 100, 70, 210,
-      // bottom of middle rung.
-      76, 210, 100, 76, 210, 100, 76, 210, 100, 76, 210, 100, 76, 210, 100, 76, 210, 100,
-      // right of bottom
-      140, 210, 80, 140, 210, 80, 140, 210, 80, 140, 210, 80, 140, 210, 80, 140, 210, 80,
-      // bottom
-      90, 130, 110, 90, 130, 110, 90, 130, 110, 90, 130, 110, 90, 130, 110, 90, 130, 110,
-      // left side
-      160, 160, 220, 160, 160, 220, 160, 160, 220, 160, 160, 220, 160, 160, 220, 160, 160, 220,
-    ],
-    DrawMode::Static,
-  )
-}
+//fn set_colors(gl: &WebGL2RenderingContext) {
+//  gl.buffer_data_u8(
+//    BufferKind::Array,
+//    &[
+//      // left column front
+//      200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120,
+//      // top rung front
+//      200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120,
+//      // middle rung front
+//      200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120, 200, 70, 120,
+//      // left column back
+//      80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200,
+//      // top rung back
+//      80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200,
+//      // middle rung back
+//      80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, 80, 70, 200, // top
+//      70, 200, 210, 70, 200, 210, 70, 200, 210, 70, 200, 210, 70, 200, 210, 70, 200, 210,
+//      // top rung right
+//      200, 200, 70, 200, 200, 70, 200, 200, 70, 200, 200, 70, 200, 200, 70, 200, 200, 70,
+//      // under top rung
+//      210, 100, 70, 210, 100, 70, 210, 100, 70, 210, 100, 70, 210, 100, 70, 210, 100, 70,
+//      // between top rung and middle
+//      210, 160, 70, 210, 160, 70, 210, 160, 70, 210, 160, 70, 210, 160, 70, 210, 160, 70,
+//      // top of middle rung
+//      70, 180, 210, 70, 180, 210, 70, 180, 210, 70, 180, 210, 70, 180, 210, 70, 180, 210,
+//      // right of middle rung
+//      100, 70, 210, 100, 70, 210, 100, 70, 210, 100, 70, 210, 100, 70, 210, 100, 70, 210,
+//      // bottom of middle rung.
+//      76, 210, 100, 76, 210, 100, 76, 210, 100, 76, 210, 100, 76, 210, 100, 76, 210, 100,
+//      // right of bottom
+//      140, 210, 80, 140, 210, 80, 140, 210, 80, 140, 210, 80, 140, 210, 80, 140, 210, 80,
+//      // bottom
+//      90, 130, 110, 90, 130, 110, 90, 130, 110, 90, 130, 110, 90, 130, 110, 90, 130, 110,
+//      // left side
+//      160, 160, 220, 160, 160, 220, 160, 160, 220, 160, 160, 220, 160, 160, 220, 160, 160, 220,
+//    ],
+//    DrawMode::Static,
+//  )
+//}
