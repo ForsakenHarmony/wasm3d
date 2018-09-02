@@ -27,6 +27,8 @@ use std::collections::HashMap;
 use std::panic;
 use std::rc::Rc;
 
+type Result<R> = std::result::Result<R, Box<std::error::Error>>;
+
 fn create_shader(
   gl: &WebGL2RenderingContext,
   kind: ShaderKind,
@@ -133,36 +135,7 @@ impl ShaderProgram {
   }
 }
 
-fn create_texture(
-  gl: &WebGL2RenderingContext,
-  width: u16,
-  height: u16,
-  pixels: &[u8],
-) -> WebGLTexture {
-  let texture = gl.create_texture();
-  gl.bind_texture(&texture);
-  gl.tex_parameteri(
-    TextureParameter::TextureMinFilter,
-    TextureMinFilter::Nearest as i32,
-  );
-  gl.tex_parameteri(
-    TextureParameter::TextureMagFilter,
-    TextureMagFilter::Nearest as i32,
-  );
-  gl.tex_image2d(
-    TextureBindPoint::Texture2d,
-    0,
-    width,
-    height,
-    PixelFormat::Rgba,
-    DataType::U8,
-    pixels,
-  );
-  // gl.generate_mipmap(TextureKind::Texture2d);
-  texture
-}
-
-fn load_image(buffer: &[u8]) -> Result<(u16, u16, Vec<u8>), Box<std::error::Error>> {
+fn load_image(buffer: &[u8]) -> Result<(u16, u16, Vec<u8>)> {
   let img = image::load_from_memory(buffer)?.to_rgba();
   Ok((img.width() as u16, img.height() as u16, img.into_raw()))
 }
@@ -248,12 +221,45 @@ impl Renderer {
     }
   }
 
+  pub fn create_texture(&self, pixels: &[u8], width: u16, height: u16) -> WebGLTexture {
+    let texture = self.gl.create_texture();
+    self.gl.bind_texture(&texture);
+    self.gl.tex_parameteri(
+      TextureParameter::TextureMinFilter,
+      TextureMinFilter::Nearest as i32,
+    );
+    self.gl.tex_parameteri(
+      TextureParameter::TextureMagFilter,
+      TextureMagFilter::Nearest as i32,
+    );
+    self.gl.tex_image2d(
+      TextureBindPoint::Texture2d,
+      0,
+      width,
+      height,
+      PixelFormat::Rgba,
+      DataType::U8,
+      pixels,
+    );
+    // gl.generate_mipmap(TextureKind::Texture2d);
+    texture
+  }
+
   pub fn create_mesh<V: VertexFormat>(&self, vertices: Vec<V>, indices: Option<Vec<u16>>) -> Mesh<V> {
     Mesh::new(&self.program, vertices, indices)
   }
 
+  fn clear(&self, r: f32, g: f32, b: f32, a: f32) {
+    self.gl.clear_color(r, g, b, a);
+    self.gl.clear(BufferBit::Color);
+    self.gl.clear(BufferBit::Depth);
+  }
+
   fn start(&self) {
     self.program.use_program();
+
+    self.gl.enable(Flag::CullFace);
+    self.gl.enable(Flag::DepthTest);
   }
 
   pub fn render_mesh<V: VertexFormat>(&mut self, mesh: &Mesh<V>, translation: Vector3<f32>) {
@@ -329,30 +335,73 @@ impl<V: VertexFormat> Mesh<V> {
   }
 }
 
-struct App {
-  renderer: Renderer,
-  gl: Rc<WebGL2RenderingContext>,
+trait State {
+  fn new(renderer: &Renderer) -> Result<Self> where Self: std::marker::Sized;
+  fn update(&mut self, delta: f32) -> Result<()>;
+  fn render(&mut self, renderer: &mut Renderer) -> Result<()>;
+  fn event(&mut self, event: AppEvent) -> Result<()> { Ok(()) }
 }
 
-fn panic_hook(info: &std::panic::PanicInfo) {
-  js! {@(no_return)
-    console.error(@{info.to_string()});
-  }
-}
+//struct App<T: State> {
+//  renderer: Renderer,
+//  gl: Rc<WebGL2RenderingContext>,
+//  state: T,
+//  web_app: WebApp,
+//  size: (u32, u32),
+//}
+//
+//impl<T: State> App<T> {
+//  pub fn new<S: Into<String>>(size: (u32, u32), title: S) -> Self {
+//    let config = AppConfig::new(title, size);
+//    let web_app = WebApp::new(config);
+//
+//    let gl = WebGL2RenderingContext::new(web_app.canvas());
+//    let gl = Rc::new(gl);
+//
+//    let aspect = size.0 as f32 / size.1 as f32;
+//
+//    let vert_code = include_str!("../shaders/vert.glsl");
+//    let frag_code = include_str!("../shaders/frag.glsl");
+//
+//    let camera = Camera::perspective(Deg(60.0), aspect, 1.0, 2000.0, Point3::origin());
+//    let mut renderer = Renderer::new(Rc::clone(&gl), vert_code, frag_code, camera);
+//
+//    let state = T::new(&renderer).unwrap();
+//
+//    App {
+//      state,
+//      gl,
+//      renderer,
+//      web_app,
+//      size,
+//    }
+//  }
+//
+//  pub fn run(mut self) {
+//    let mut last = 0.0;
+//    self.web_app.run(move |app, t| {
+//      let t = t as f32;
+//      let delta = (t - last) / 1000.0;
+//      last = t;
+//
+//      for event in app.events.borrow_mut().drain(..) {
+//        self.state.event(event);
+//      }
+//
+//      self.state.update(delta);
+//
+//      self.gl.viewport(0, 0, self.size.0, self.size.1);
+//
+//      self.state.render(&mut self.renderer);
+//    });
+//  }
+//}
 
-#[cfg(target_arch = "wasm32")]
-pub fn main() -> Result<(), Box<std::error::Error>> {
-  std::panic::set_hook(Box::new(panic_hook));
+fn run<T: State>(size: (u32, u32), title: &'static str) where T: 'static {
+  let config = AppConfig::new(title, size);
+  let web_app = WebApp::new(config);
 
-  let thing = 3;
-
-  let size = (1280, 720);
-  let config = AppConfig::new("Test", size);
-  let app = WebApp::new(config);
-
-  let img = load_image(include_bytes!("../static/f-texture.png"))?;
-
-  let gl = WebGL2RenderingContext::new(app.canvas());
+  let gl = WebGL2RenderingContext::new(web_app.canvas());
   let gl = Rc::new(gl);
 
   let aspect = size.0 as f32 / size.1 as f32;
@@ -363,74 +412,66 @@ pub fn main() -> Result<(), Box<std::error::Error>> {
   let camera = Camera::perspective(Deg(60.0), aspect, 1.0, 2000.0, Point3::origin());
   let mut renderer = Renderer::new(Rc::clone(&gl), vert_code, frag_code, camera);
 
-  let vertices = get_geometry().chunks(3).zip(get_texcoords().chunks(2)).map(|(geom, tex)| {
-    VertexPosTex {
-      pos: [geom[0], geom[1], geom[2]],
-      tex: [tex[0], tex[1]],
-    }
-  }).collect();
-
-  let f = renderer.create_mesh(vertices, None);
-
-//  let shader_program = ShaderProgram::new(Rc::clone(&gl), vert_code, frag_code);
-//  let vao = shader_program.create_vertex_array();
-//  let pos_buffer =
-//    shader_program.create_buffer(AttributeSize::Three, "a_position", DataType::Float);
-//  let tex_buffer = shader_program.create_buffer(AttributeSize::Two, "a_texcoord", DataType::Float);
-//  let u_matrix = shader_program.create_uniform::<MatrixUniform>("u_matrix");
-//
-//  pos_buffer.set_data(get_geometry().as_slice());
-//  tex_buffer.set_data(get_texcoords());
-
-  // look up data locations
-  // let pos_attr_loc = gl.get_attrib_location(&program, "a_position").unwrap();
-  // let tex_coord_loc = gl.get_attrib_location(&program, "a_texcoord").unwrap();
-
-  // let u_matrix = create_uniform::<MatrixUniform>(&gl, &program, "u_matrix");
-
-  // look up uniforms
-  //  let matrix_loc = gl.get_uniform_location(&program, "u_matrix").unwrap();
-
-  let texture = create_texture(&gl, img.0, img.1, img.2.as_slice());
-
-  let mut translation = Vector3::from((-150.0, 0.0, -660.0));
-  let mut scale = Vector3::from((1.0, 1.0, 1.0));
-  let mut angle = 0.0;
-
-  fn to_rad(angle: f32) -> f32 {
-    (360.0 - angle) * std::f32::consts::PI / 180.0
-  }
+  let mut state = T::new(&renderer).unwrap();
 
   let mut last = 0.0;
-  app.run(move |app: &mut WebApp, t: f64| {
+  web_app.run(move |app, t| {
     let t = t as f32;
     let delta = (t - last) / 1000.0;
     last = t;
 
-    angle = (angle + 10.0 * delta) % 360.0;
-    let radian_angle = Deg(angle);
+    for event in app.events.borrow_mut().drain(..) {
+      state.event(event);
+    }
+
+    state.update(delta);
 
     gl.viewport(0, 0, size.0, size.1);
 
-    gl.clear_color(0.0, 0.0, 0.0, 0.0);
-    gl.clear(BufferBit::Color);
-    gl.clear(BufferBit::Depth);
-
-    gl.enable(Flag::CullFace);
-    gl.enable(Flag::DepthTest);
-
     renderer.start();
+
+    state.render(&mut renderer);
+  });
+}
+
+struct GameState {
+  f: Mesh<VertexPosTex>,
+  texture: WebGLTexture,
+  angle: f32,
+}
+
+impl State for GameState {
+  fn new(renderer: &Renderer) -> Result<Self> {
+    let vertices = get_geometry().chunks(3).zip(get_texcoords().chunks(2)).map(|(geom, tex)| {
+      VertexPosTex {
+        pos: [geom[0], geom[1], geom[2]],
+        tex: [tex[0], tex[1]],
+      }
+    }).collect();
+
+    let img = load_image(include_bytes!("../static/f-texture.png"))?;
+
+    Ok(GameState {
+      f: renderer.create_mesh(vertices, None),
+      texture: renderer.create_texture(img.2.as_slice(), img.0, img.1),
+      angle: 0.0,
+    })
+  }
+
+  fn update(&mut self, delta: f32) -> Result<()> {
+    self.angle = (self.angle + 10.0 * delta) % 360.0;
+    Ok(())
+  }
+
+  fn render(&mut self, renderer: &mut Renderer) -> Result<()> {
+    renderer.clear(0.0, 0.0, 0.0, 0.0);
 
     let num_fs = 5;
     let radius = 200.0;
 
-    let aspect = size.0 as f32 / size.1 as f32;
-
     let f_pos = Point3::new(radius, 0.0, 0.0);
 
-    let projection_matrix = perspective(Deg(60.0), aspect, 1.0, 2000.0);
-
-    let camera_matrix = Matrix4::from_angle_y(radian_angle)
+    let camera_matrix = Matrix4::from_angle_y(Deg(self.angle))
         * Matrix4::from_translation(Vector3::new(0.0, 50.0, radius * 1.5));
     let cam_pos = camera_matrix.transform_point(Point3::origin());
 
@@ -444,17 +485,22 @@ pub fn main() -> Result<(), Box<std::error::Error>> {
       let x = angle.cos() * radius;
       let z = angle.sin() * radius;
 
-//      let matrix = view_projection_matrix * Matrix4::from_translation(Vector3::new(x, 0.0, z));
-//
-//      u_matrix.set(matrix);
-
-      renderer.render_mesh(&f, Vector3::new(x, 0.0, z));
-
-//      gl.draw_arrays(Primitives::Triangles, 16 * 6);
+      renderer.render_mesh(&self.f, Vector3::new(x, 0.0, z));
     }
-  });
 
-  Ok(())
+    Ok(())
+  }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn main() {
+  std::panic::set_hook(Box::new(|info: &std::panic::PanicInfo| {
+    js! {@(no_return)
+      console.error(@{info.to_string()});
+    }
+  }));
+
+  run::<GameState>((1280, 720), "Test");
 }
 
 fn get_geometry() -> Vec<f32> {
