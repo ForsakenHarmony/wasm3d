@@ -1,6 +1,6 @@
 pub mod glenum;
 
-pub use glenum::*;
+pub use self::glenum::*;
 
 use std::ops::Deref;
 use stdweb::unstable::{TryFrom, TryInto};

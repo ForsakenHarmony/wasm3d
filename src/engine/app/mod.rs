@@ -95,7 +95,7 @@ pub mod events {
 
 }
 
-pub use events::*;
+pub use self::events::*;
 
 #[derive(Debug, Clone)]
 pub enum AppEvent {

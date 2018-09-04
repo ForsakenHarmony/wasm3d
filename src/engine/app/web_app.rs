@@ -1,5 +1,5 @@
 use stdweb;
-use AppConfig;
+use super::AppConfig;
 
 use stdweb::traits::IEvent;
 use stdweb::unstable::TryInto;
@@ -15,7 +15,7 @@ use stdweb::web::IHtmlElement;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use AppEvent;
+use super::AppEvent;
 
 pub struct App {
   window: CanvasElement,
