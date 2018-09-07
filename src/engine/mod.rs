@@ -1,4 +1,5 @@
 #![allow(unused)]
+
 pub mod app;
 pub mod webgl;
 
@@ -75,11 +76,10 @@ pub struct ShaderProgram {
 impl ShaderProgram {
   pub fn new(
     gl: Rc<WebGL2RenderingContext>,
-    vert_code: &'static str,
-    frag_code: &'static str,
+    shader_config: &ShaderConfig,
   ) -> Self {
-    let vert_shader = create_shader(&gl, ShaderKind::Vertex, vert_code);
-    let frag_shader = create_shader(&gl, ShaderKind::Fragment, frag_code);
+    let vert_shader = create_shader(&gl, ShaderKind::Vertex, shader_config.vert_code);
+    let frag_shader = create_shader(&gl, ShaderKind::Fragment, shader_config.frag_code);
     let program = create_program(&gl, &vert_shader, &frag_shader);
 
     let location = gl.get_uniform_location(&program, "u_matrix").unwrap();
@@ -168,6 +168,10 @@ impl Camera {
     }
   }
 
+  pub fn combined(&self) -> Matrix4<f32> {
+    self.view_proj
+  }
+
   pub fn look_at(&mut self, target: Point3<f32>) {
     self.view = Matrix4::look_at(self.pos, target, Vector3::unit_y());
   }
@@ -181,32 +185,51 @@ impl Camera {
   }
 }
 
+pub struct ShaderConfig {
+  vert_code: &'static str,
+  frag_code: &'static str,
+}
+
+impl Default for ShaderConfig {
+  fn default() -> Self {
+    ShaderConfig {
+      vert_code: include_str!("./shaders/vert.glsl"),
+      frag_code: include_str!("./shaders/frag.glsl"),
+    }
+  }
+}
+
 pub struct Renderer {
   gl: Rc<WebGL2RenderingContext>,
-  program: ShaderProgram,
-  camera: Camera,
+  projection: Matrix4<f32>,
   size: (u32, u32),
+  shaders: HashMap<TypeId, ShaderProgram>,
+  active_shader: Option<TypeId>,
+  shader_config: ShaderConfig,
 }
 
 impl Renderer {
   pub fn new(
     gl: Rc<WebGL2RenderingContext>,
-    vert_code: &'static str,
-    frag_code: &'static str,
-    camera: Camera,
+    size: (u32, u32),
+    shader_config: ShaderConfig,
   ) -> Self {
-    let program = ShaderProgram::new(Rc::clone(&gl), vert_code, frag_code);
-
     Renderer {
       gl,
-      program,
-      camera,
-      size: (1280, 720),
+      projection: Matrix4::one(),
+      size,
+      shaders: HashMap::new(),
+      active_shader: None,
+      shader_config,
     }
   }
 
-  pub fn camera(&mut self) -> &mut Camera {
-    &mut self.camera
+  pub fn aspect(&self) -> f32 {
+    self.size.0 as f32 / self.size.1 as f32
+  }
+
+  pub fn set_projection(&mut self, projection: Matrix4<f32>) {
+    self.projection = projection;
   }
 
   pub fn create_texture(&self, pixels: &[u8], width: u16, height: u16) -> WebGLTexture {
@@ -233,8 +256,9 @@ impl Renderer {
     texture
   }
 
-  pub fn create_mesh<V: VertexFormat>(&self, vertices: Vec<V>, indices: Option<Vec<u16>>) -> Mesh<V> {
-    Mesh::new(&self.program, vertices, indices)
+  pub fn create_mesh<V: VertexFormat>(&mut self, vertices: Vec<V>, indices: Option<Vec<u16>>) -> Mesh<V> where V: 'static {
+    let program = self.shaders.entry(TypeId::of::<V>()).or_insert(ShaderProgram::new(Rc::clone(&self.gl), &self.shader_config));
+    Mesh::new(&program, vertices, indices)
   }
 
   pub fn clear(&self, r: f32, g: f32, b: f32, a: f32) {
@@ -244,17 +268,23 @@ impl Renderer {
   }
 
   fn start(&self) {
-    self.program.use_program();
-
     self.gl.enable(Flag::CullFace);
     self.gl.enable(Flag::DepthTest);
   }
 
-  pub fn render_mesh<V: VertexFormat>(&mut self, mesh: &Mesh<V>, transform: Matrix4<f32>) {
+  pub fn render_mesh<V: VertexFormat>(&mut self, mesh: &Mesh<V>, transform: Matrix4<f32>) where V: 'static {
+    let typeid = TypeId::of::<V>();
+    let program = self.shaders.get_mut(&TypeId::of::<V>()).expect("There should be a program for a mesh that was previously created with it");
+    if let Some(active) = self.active_shader {
+      if active != typeid {
+        program.use_program();
+      }
+    } else {
+      program.use_program();
+    }
+    program.u_matrix.set(self.projection * transform);
+
     self.gl.bind_vertex_array(&mesh.vao);
-
-    self.program.u_matrix.set(self.camera.view_proj * transform);
-
     self.gl.draw_elements(Primitives::Triangles, mesh.vertices.len(), DataType::U16, 0);
   }
 }
@@ -320,7 +350,7 @@ impl<V: VertexFormat> Mesh<V> {
 }
 
 pub trait State {
-  fn new(renderer: &Renderer) -> Result<Self> where Self: ::std::marker::Sized;
+  fn new(renderer: &mut Renderer) -> Result<Self> where Self: ::std::marker::Sized;
   fn update(&mut self, delta: f32) -> Result<()>;
   fn render(&mut self, renderer: &mut Renderer) -> Result<()>;
   fn event(&mut self, event: AppEvent) -> Result<()> { Ok(()) }
@@ -338,10 +368,9 @@ pub fn run<T: State>(size: (u32, u32), title: &'static str) where T: 'static {
   let vert_code = include_str!("./shaders/vert.glsl");
   let frag_code = include_str!("./shaders/frag.glsl");
 
-  let camera = Camera::perspective(Deg(60.0), aspect, 1.0, 2000.0, Point3::origin());
-  let mut renderer = Renderer::new(Rc::clone(&gl), vert_code, frag_code, camera);
+  let mut renderer = Renderer::new(Rc::clone(&gl), size, ShaderConfig::default());
 
-  let mut state = T::new(&renderer).unwrap();
+  let mut state = T::new(&mut renderer).unwrap();
 
   let mut last = 0.0;
   web_app.run(move |app, t| {

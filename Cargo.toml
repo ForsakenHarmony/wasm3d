@@ -10,6 +10,7 @@ serde = "1.0"
 serde_derive = "1.0"
 rand = { version ="0.5", features=["stdweb"] }
 cgmath = "0.16"
+gltf = "0.11.2"
 
 [dependencies.image]
 version = "0.19"
@@ -18,3 +19,6 @@ features = ["png_codec", "tga", "jpeg"]
 
 [build-dependencies]
 webgl_generator = "0.1.0"
+
+[patch.crates-io]
+gltf = { git = "https://github.com/ForsakenHarmony/gltf.git" }

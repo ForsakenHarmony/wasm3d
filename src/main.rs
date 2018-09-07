@@ -13,6 +13,7 @@ extern crate serde_derive;
 extern crate cgmath;
 extern crate image;
 extern crate rand;
+extern crate gltf;
 
 mod engine;
 mod util;
@@ -20,6 +21,8 @@ mod util;
 use cgmath::{
   perspective, Deg, EuclideanSpace, Matrix, Matrix4, Point3, Rad, SquareMatrix, Transform, Vector3,
 };
+use gltf::Gltf;
+
 use engine::*;
 use engine::webgl::WebGLTexture;
 
@@ -30,14 +33,22 @@ fn load_image(buffer: &[u8]) -> Result<(u16, u16, Vec<u8>)> {
   Ok((img.width() as u16, img.height() as u16, img.into_raw()))
 }
 
+//fn load_gltf(buffer: &[u8]) -> Result<(gltf::Document, Vec<gltf::buffer::Data>, Vec<gltf::image::Data>)> {
+//  let Gltf { document, blob } = Gltf::from_slice(buffer)?;
+//  let buffer_data = gltf::import::import_buffer_data(&document, base, blob)?;
+//  let image_data = gltf::import::import_image_data(&document, base, &buffer_data)?;
+//  Ok((document, buffer_data, image_data))
+//}
+
 struct GameState {
   f: Mesh<VertexPosTex>,
   texture: WebGLTexture,
   angle: f32,
+  camera: Camera,
 }
 
 impl State for GameState {
-  fn new(renderer: &Renderer) -> Result<Self> {
+  fn new(renderer: &mut Renderer) -> Result<Self> {
     let vertices = get_geometry().chunks(3).zip(get_texcoords().chunks(2)).map(|(geom, tex)| {
       VertexPosTex {
         pos: [geom[0], geom[1], geom[2]],
@@ -51,6 +62,7 @@ impl State for GameState {
       f: renderer.create_mesh(vertices, None),
       texture: renderer.create_texture(img.2.as_slice(), img.0, img.1),
       angle: 0.0,
+      camera: Camera::perspective(Deg(60.0), renderer.aspect(), 1.0, 2000.0, Point3::origin()),
     })
   }
 
@@ -71,11 +83,11 @@ impl State for GameState {
         * Matrix4::from_translation(Vector3::new(0.0, 50.0, radius * 1.5));
     let cam_pos = camera_matrix.transform_point(Point3::origin());
 
-    let camera = renderer.camera();
+    self.camera.set_pos(cam_pos);
+    self.camera.look_at(f_pos);
+    self.camera.update();
 
-    camera.set_pos(cam_pos);
-    camera.look_at(f_pos);
-    camera.update();
+    renderer.set_projection(self.camera.combined());
 
     for i in 0..num_fs {
       let angle = i as f32 * ::std::f32::consts::PI * 2.0 / num_fs as f32;
@@ -92,6 +104,12 @@ impl State for GameState {
   }
 }
 
+fn log<T: Into<String>>(msg: T) {
+  js! {@(no_return)
+    console.log(@{msg.into()});
+  }
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn main() {
   std::panic::set_hook(Box::new(|info: &std::panic::PanicInfo| {
@@ -99,6 +117,75 @@ pub fn main() {
       console.error(@{info.to_string()});
     }
   }));
+
+//  let (document, buffers, images) = load_gltf(include_bytes!("../static/fox.glb")).unwrap();
+  let (document, buffers, images) = ::gltf::import_slice(include_bytes!("../static/fox.glb")).unwrap();
+
+  log(format!("{:#?}", buffers.len()));
+  log(format!("{:#?}", images.len()));
+
+  let thing: ::gltf::Semantic;
+  let thing: ::gltf::Accessor;
+  let thing: ::gltf::Buffer;
+  let thing: ::gltf::buffer::View;
+
+  for buffer in document.buffers() {
+    log(format!("Buffer: {:#?} {:#?} {:#?} {:#?}", buffer.name(), buffer.length(), buffer.index(), buffer.extras()));
+  }
+
+  for view in document.views() {
+    log(format!("View: {:#?} {:#?} {:#?} {:#?} {:#?}", view.name(), view.length(), view.index(), view.offset(), view.extras()));
+  }
+
+  let accessors = document.accessors().map(|acc| {
+    let view = acc.view();
+    let buffer = view.buffer();
+
+    let offset = view.offset();
+    let length = view.length();
+
+    let buffer_slice = buffers[buffer.index()].0[offset..offset + length];
+
+    use ::gltf::json::accessor::ComponentType;
+    let type_size = match acc.data_type() {
+      I8 => 1,
+      U8 => 1,
+      I16 => 2,
+      U16 => 2,
+      U32 => 4,
+      F32 => 4,
+    };
+    let container_size = match acc.dimensions() {
+      Scalar => 1,
+      Vec2 => 2,
+      Vec3 => 3,
+      Vec4 => 4,
+      Mat2 => 4,
+      Mat3 => 9,
+      Mat4 => 16,
+    };
+    buffer_slice.chunks(type_size).map(|chunk| {
+      let arr = [chunk[0], chunk[1], chunk[2], chunk[3]];
+      let thing: f32 = unsafe { std::mem::transmute::<[u8; type_size], f32>(arr) };
+    }).collect::<Vec<_>>();
+  }).collect::<Vec<_>>();
+
+  for acc in document.accessors() {
+    log(format!("Accessor: {:#?} {:#?} {:#?} {:#?}", acc.name(), acc.index(), acc.offset(), acc.data_type()));
+  }
+
+  for mesh in document.meshes() {
+    for prim in mesh.primitives() {
+//      log(format!("{:#?}", prim));
+      for (sem, acc) in prim.attributes() {
+        let view = acc.view();
+        let buffer = view.buffer();
+        log(format!("Semantic: {:#?} \nAccessor: {:#?} {:#?} {:#?} {:#?} {:#?}\nView: {:#?} {:#?} {:#?} {:#?} \nBuffer: {:#?}", sem, acc.index(), acc.offset(), acc.data_type(), acc.dimensions(), acc.count(), view.index(), view.offset(), view.length(), view.target(), buffer.index()));
+      }
+    }
+  }
+
+//  log(format!("{:?}", gltf));
 
   run::<GameState>((1280, 720), "Test");
 }
