@@ -80,7 +80,7 @@ impl State for GameState {
     let f_pos = Point3::new(radius, 0.0, 0.0);
 
     let camera_matrix = Matrix4::from_angle_y(Deg(self.angle))
-        * Matrix4::from_translation(Vector3::new(0.0, 50.0, radius * 1.5));
+      * Matrix4::from_translation(Vector3::new(0.0, 50.0, radius * 1.5));
     let cam_pos = camera_matrix.transform_point(Point3::origin());
 
     self.camera.set_pos(cam_pos);
@@ -144,10 +144,14 @@ pub fn main() {
     let offset = view.offset();
     let length = view.length();
 
-    let buffer_slice = buffers[buffer.index()].0[offset..offset + length];
+    let buffer_slice = &buffers[buffer.index()].0[offset..offset + length];
 
-    use ::gltf::json::accessor::ComponentType;
-    let type_size = match acc.data_type() {
+    use ::gltf::json::accessor::ComponentType::*;
+    use ::gltf::json::accessor::Type::*;
+
+    let data_type = acc.data_type();
+
+    let type_size = match data_type {
       I8 => 1,
       U8 => 1,
       I16 => 2,
@@ -155,7 +159,42 @@ pub fn main() {
       U32 => 4,
       F32 => 4,
     };
-    let container_size = match acc.dimensions() {
+
+    #[derive(Copy, Clone)]
+    enum Types {
+      I8(i8),
+      U8(u8),
+      I16(i16),
+      U16(u16),
+      F32(f32),
+      U32(u32),
+    }
+
+    fn cast<T: Copy>(chunk: &[u8]) -> T {
+      unsafe { *(chunk.as_ptr() as *const T) }
+    }
+
+    let typed_buffer = buffer_slice.chunks(type_size).map(|chunk| match data_type {
+      I8 => Types::I8(cast(chunk)),
+      U8 => Types::U8(cast(chunk)),
+      I16 => Types::I16(cast(chunk)),
+      U16 => Types::U16(cast(chunk)),
+      U32 => Types::U32(cast(chunk)),
+      F32 => Types::F32(cast(chunk)),
+    }).collect::<Vec<_>>();
+
+    enum Container<T: Copy> {
+      Scalar(T),
+      Vec2([T; 2]),
+      Vec3([T; 3]),
+      Vec4([T; 4]),
+      Mat2([[T; 2]; 2]),
+      Mat3([[T; 3]; 3]),
+      Mat4([[T; 4]; 4]),
+    }
+
+    let dimensions = acc.dimensions();
+    let container_size = match dimensions {
       Scalar => 1,
       Vec2 => 2,
       Vec3 => 3,
@@ -164,9 +203,15 @@ pub fn main() {
       Mat3 => 9,
       Mat4 => 16,
     };
-    buffer_slice.chunks(type_size).map(|chunk| {
-      let arr = [chunk[0], chunk[1], chunk[2], chunk[3]];
-      let thing: f32 = unsafe { std::mem::transmute::<[u8; type_size], f32>(arr) };
+
+    let containers = typed_buffer.chunks(container_size).map(|chunk| match dimensions {
+      Scalar => Container::Scalar(chunk[0]),
+      Vec2 => Container::Vec2([chunk[0], chunk[1]]),
+      Vec3 => Container::Vec3([chunk[0], chunk[1], chunk[2]]),
+      Vec4 => Container::Vec4([chunk[0], chunk[1], chunk[2], chunk[3]]),
+      Mat2 => Container::Mat2([[chunk[0], chunk[1]], [chunk[2], chunk[3]]]),
+      Mat3 => Container::Mat3([[chunk[0], chunk[1], chunk[2]], [chunk[3], chunk[4], chunk[5]], [chunk[6], chunk[7], chunk[8]]]),
+      Mat4 => Container::Mat4([[chunk[0], chunk[1], chunk[2], chunk[3]], [chunk[4], chunk[5], chunk[6], chunk[7]], [chunk[8], chunk[9], chunk[10], chunk[11]], [chunk[12], chunk[13], chunk[14], chunk[15]]]),
     }).collect::<Vec<_>>();
   }).collect::<Vec<_>>();
 
@@ -233,14 +278,14 @@ fn get_geometry() -> Vec<f32> {
   ];
 
   let matrix = Matrix4::from_angle_x(Deg(180.0))
-      * Matrix4::from_translation(Vector3::new(-50.0, -75.0, -15.0));
+    * Matrix4::from_translation(Vector3::new(-50.0, -75.0, -15.0));
 
   let mut vec = Vec::<f32>::new();
 
   for coord in arr.chunks(3) {
     let out: [f32; 3] = matrix
-        .transform_point([coord[0], coord[1], coord[2]].into())
-        .into();
+      .transform_point([coord[0], coord[1], coord[2]].into())
+      .into();
     vec.extend_from_slice(&out);
   }
 
