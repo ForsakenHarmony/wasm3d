@@ -11,6 +11,7 @@ serde_derive = "1.0"
 rand = { version ="0.5", features=["stdweb"] }
 cgmath = "0.16"
 gltf = "0.11.2"
+bitflags = "1.0.4"
 
 [dependencies.image]
 version = "0.19"

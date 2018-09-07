@@ -14,6 +14,8 @@ extern crate cgmath;
 extern crate image;
 extern crate rand;
 extern crate gltf;
+#[macro_use]
+extern crate bitflags;
 
 mod engine;
 mod util;
@@ -23,8 +25,14 @@ use cgmath::{
 };
 use gltf::Gltf;
 
-use engine::*;
-use engine::webgl::WebGLTexture;
+use engine::{
+  run,
+  State,
+  renderer::{Renderer, Camera},
+  mesh::{Mesh, VertexPosTex},
+  webgl::{WebGLTexture},
+};
+use std::collections::HashMap;
 
 type Result<R> = std::result::Result<R, Box<std::error::Error>>;
 
@@ -66,8 +74,8 @@ impl State for GameState {
     })
   }
 
-  fn update(&mut self, delta: f32) -> Result<()> {
-    self.angle = (self.angle + 10.0 * delta) % 360.0;
+  fn update(&mut self, delta: f64) -> Result<()> {
+    self.angle = (self.angle + 10.0 * delta as f32) % 360.0;
     Ok(())
   }
 
@@ -80,7 +88,7 @@ impl State for GameState {
     let f_pos = Point3::new(radius, 0.0, 0.0);
 
     let camera_matrix = Matrix4::from_angle_y(Deg(self.angle))
-      * Matrix4::from_translation(Vector3::new(0.0, 50.0, radius * 1.5));
+        * Matrix4::from_translation(Vector3::new(0.0, 50.0, radius * 1.5));
     let cam_pos = camera_matrix.transform_point(Point3::origin());
 
     self.camera.set_pos(cam_pos);
@@ -160,7 +168,7 @@ pub fn main() {
       F32 => 4,
     };
 
-    #[derive(Copy, Clone)]
+    #[derive(Copy, Clone, Debug)]
     enum Types {
       I8(i8),
       U8(u8),
@@ -183,6 +191,7 @@ pub fn main() {
       F32 => Types::F32(cast(chunk)),
     }).collect::<Vec<_>>();
 
+    #[derive(Debug)]
     enum Container<T: Copy> {
       Scalar(T),
       Vec2([T; 2]),
@@ -213,7 +222,11 @@ pub fn main() {
       Mat3 => Container::Mat3([[chunk[0], chunk[1], chunk[2]], [chunk[3], chunk[4], chunk[5]], [chunk[6], chunk[7], chunk[8]]]),
       Mat4 => Container::Mat4([[chunk[0], chunk[1], chunk[2], chunk[3]], [chunk[4], chunk[5], chunk[6], chunk[7]], [chunk[8], chunk[9], chunk[10], chunk[11]], [chunk[12], chunk[13], chunk[14], chunk[15]]]),
     }).collect::<Vec<_>>();
+
+    containers
   }).collect::<Vec<_>>();
+
+  log(format!("Accessors: {:#?}", accessors));
 
   for acc in document.accessors() {
     log(format!("Accessor: {:#?} {:#?} {:#?} {:#?}", acc.name(), acc.index(), acc.offset(), acc.data_type()));
@@ -221,7 +234,10 @@ pub fn main() {
 
   for mesh in document.meshes() {
     for prim in mesh.primitives() {
-//      log(format!("{:#?}", prim));
+      //      log(format!("{:#?}", prim));
+      use std::iter::FromIterator;
+      let map: HashMap<::gltf::Semantic, ::gltf::Accessor> = HashMap::from_iter(prim.attributes());
+
       for (sem, acc) in prim.attributes() {
         let view = acc.view();
         let buffer = view.buffer();
@@ -278,14 +294,14 @@ fn get_geometry() -> Vec<f32> {
   ];
 
   let matrix = Matrix4::from_angle_x(Deg(180.0))
-    * Matrix4::from_translation(Vector3::new(-50.0, -75.0, -15.0));
+      * Matrix4::from_translation(Vector3::new(-50.0, -75.0, -15.0));
 
   let mut vec = Vec::<f32>::new();
 
   for coord in arr.chunks(3) {
     let out: [f32; 3] = matrix
-      .transform_point([coord[0], coord[1], coord[2]].into())
-      .into();
+        .transform_point([coord[0], coord[1], coord[2]].into())
+        .into();
     vec.extend_from_slice(&out);
   }
 
