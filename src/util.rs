@@ -1,17 +1,24 @@
-use std::mem::size_of;
-
-pub trait IntoBytes {
-  fn into_bytes(self) -> Vec<u8>;
+#[derive(Copy, Clone, Debug)]
+enum Types {
+  I8(i8),
+  U8(u8),
+  I16(i16),
+  U16(u16),
+  F32(f32),
+  U32(u32),
 }
 
-impl<T> IntoBytes for Vec<T> {
-  fn into_bytes(self) -> Vec<u8> {
-    let len = size_of::<T>() * self.len();
-    unsafe {
-      let slice = self.into_boxed_slice();
+#[derive(Debug)]
+enum Container<T: Copy> {
+  Scalar(T),
+  Vec2([T; 2]),
+  Vec3([T; 3]),
+  Vec4([T; 4]),
+  Mat2([[T; 2]; 2]),
+  Mat3([[T; 3]; 3]),
+  Mat4([[T; 4]; 4]),
+}
 
-      let out = Vec::<u8>::from_raw_parts(Box::into_raw(slice) as _, len, len);
-      out
-    }
-  }
+fn parse_buffer<T>(buffers: &Vec<::gltf::buffer::Data> , accessor: &::gltf::Accessor) -> T {
+
 }

@@ -122,7 +122,7 @@ fn log<T: Into<String>>(msg: T) {
 pub fn main() {
   std::panic::set_hook(Box::new(|info: &std::panic::PanicInfo| {
     js! {@(no_return)
-      console.error(@{info.to_string()});
+      console.error(@{format!("{:#?}", info)});
     }
   }));
 

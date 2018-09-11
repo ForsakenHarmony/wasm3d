@@ -6,7 +6,11 @@ bitflags! {
     const Pos = 0b00000001;
     const Tex = 0b00000010;
     const Nor = 0b00000100;
+    const Col = 0b00000100;
+    const Tan = 0b00000100;
     const PosTex = Self::Pos.bits | Self::Tex.bits;
+    const PosTexNor = Self::Pos.bits | Self::Tex.bits | Self::Nor.bits;
+    const PosTexNorTan = Self::Pos.bits | Self::Tex.bits | Self::Nor.bits | Self::Tan::bits;
   }
 }
 
