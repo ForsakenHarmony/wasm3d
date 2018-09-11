@@ -1,0 +1,11 @@
+[package]
+name = "engine_codegen"
+version = "0.1.0"
+authors = ["Leah <me@hrmny.pw>"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "0.15", features = ["full", "extra-traits"] }
+quote = "0.6"

@@ -13,6 +13,10 @@ cgmath = "0.16"
 gltf = "0.11.2"
 bitflags = "1.0.4"
 
+[dependencies.engine_codegen]
+version = "*"
+path = "./engine_codegen"
+
 [dependencies.image]
 version = "0.19"
 default-features = false

@@ -92,7 +92,7 @@ pub fn run<T: State>(size: (u32, u32), title: &'static str) where T: 'static {
       let fps = count / time;
       start = after;
 
-      renderer.gl.log(format!("FPS: {}\tFrametime: {} (min: {}, max: {})", fps as u32, avg, min, max));
+      renderer.gl.log(format!("FPS: {}\tFrametime: {:.2}ms (min: {:.2}ms, max: {:.2}ms)", fps as u32, avg, min, max));
     };
   });
 }

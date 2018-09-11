@@ -2,14 +2,15 @@ use std::rc::Rc;
 use cgmath::Matrix4;
 
 use super::webgl::*;
+use super::mesh::VertexFormat;
 
 fn create_shader(
   gl: &WebGL2RenderingContext,
   kind: ShaderKind,
-  source: &'static str,
+  source: String,
 ) -> WebGLShader {
   let shader = gl.create_shader(kind);
-  gl.shader_source(&shader, source);
+  gl.shader_source(&shader, &source);
   gl.compile_shader(&shader);
   shader
 }
@@ -47,12 +48,17 @@ pub struct ShaderProgram {
 }
 
 impl ShaderProgram {
-  pub fn new(
+  pub fn new<V: VertexFormat>(
     gl: Rc<WebGL2RenderingContext>,
     shader_config: &ShaderConfig,
   ) -> Self {
-    let vert_shader = create_shader(&gl, ShaderKind::Vertex, shader_config.vert_code);
-    let frag_shader = create_shader(&gl, ShaderKind::Fragment, shader_config.frag_code);
+    let definitions = V::FLAGS.to_defs();
+
+    let vert_code = shader_config.vert_code.replace("#{{defs}}", &definitions);
+    let frag_code = shader_config.frag_code.replace("#{{defs}}", &definitions);
+
+    let vert_shader = create_shader(&gl, ShaderKind::Vertex, vert_code);
+    let frag_shader = create_shader(&gl, ShaderKind::Fragment, frag_code);
     let program = create_program(&gl, &vert_shader, &frag_shader);
 
     let location = gl.get_uniform_location(&program, "u_matrix").unwrap();
@@ -108,14 +114,14 @@ impl VBO {
     VBO { buffer, gl }
   }
 
-  pub fn set_data(&self, data: &[f32]) {
+  pub fn set_data_f32(&self, data: &[f32]) {
     self.gl.bind_buffer(BufferKind::Array, &self.buffer);
     self
         .gl
         .buffer_data_f32(BufferKind::Array, data, DrawMode::Static);
   }
 
-  pub fn set_data_bytes(&self, data: &[u8]) {
+  pub fn set_data_u8(&self, data: &[u8]) {
     self.gl.bind_buffer(BufferKind::Array, &self.buffer);
     self
         .gl

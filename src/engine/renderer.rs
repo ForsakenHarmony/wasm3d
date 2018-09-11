@@ -104,8 +104,9 @@ impl Renderer {
     texture
   }
 
-  pub fn create_mesh<V: VertexFormat>(&mut self, vertices: Vec<V>, indices: Option<Vec<u16>>) -> Mesh<V> where V: 'static {
-    let program = self.shaders.entry(TypeId::of::<V>()).or_insert(ShaderProgram::new(Rc::clone(&self.gl), &self.shader_config));
+  pub fn create_mesh<V: VertexFormat>(&mut self, vertices: V, indices: Option<Vec<u16>>) -> Mesh<V> where V: 'static {
+    // get the shader program for the vertex type, or create one
+    let program = self.shaders.entry(TypeId::of::<V>()).or_insert(ShaderProgram::new::<V>(Rc::clone(&self.gl), &self.shader_config));
     Mesh::new(&program, vertices, indices)
   }
 
@@ -133,6 +134,6 @@ impl Renderer {
     program.u_matrix.set(self.projection * transform);
 
     self.gl.bind_vertex_array(&mesh.vao);
-    self.gl.draw_elements(Primitives::Triangles, mesh.vertices.len(), DataType::U16, 0);
+    self.gl.draw_elements(Primitives::Triangles, mesh.vertices.vertex_count(), DataType::U16, 0);
   }
 }

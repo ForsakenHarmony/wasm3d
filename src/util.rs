@@ -19,6 +19,6 @@ enum Container<T: Copy> {
   Mat4([[T; 4]; 4]),
 }
 
-fn parse_buffer<T>(buffers: &Vec<::gltf::buffer::Data> , accessor: &::gltf::Accessor) -> T {
-
-}
+//fn parse_buffer<T>(buffers: &Vec<::gltf::buffer::Data> , accessor: &::gltf::Accessor) -> T {
+//
+//}

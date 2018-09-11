@@ -16,6 +16,8 @@ extern crate rand;
 extern crate gltf;
 #[macro_use]
 extern crate bitflags;
+#[macro_use]
+extern crate engine_codegen;
 
 mod engine;
 mod util;
@@ -57,12 +59,10 @@ struct GameState {
 
 impl State for GameState {
   fn new(renderer: &mut Renderer) -> Result<Self> {
-    let vertices = get_geometry().chunks(3).zip(get_texcoords().chunks(2)).map(|(geom, tex)| {
-      VertexPosTex {
-        pos: [geom[0], geom[1], geom[2]],
-        tex: [tex[0], tex[1]],
-      }
-    }).collect();
+    let vertices = VertexPosTex {
+      pos: get_geometry(),
+      tex: get_texcoords(),
+    };
 
     let img = load_image(include_bytes!("../static/f-texture.png"))?;
 
@@ -234,6 +234,8 @@ pub fn main() {
 
   for mesh in document.meshes() {
     for prim in mesh.primitives() {
+      let position_accessor = prim.get(&::gltf::Semantic::Positions).unwrap();
+
       //      log(format!("{:#?}", prim));
       use std::iter::FromIterator;
       let map: HashMap<::gltf::Semantic, ::gltf::Accessor> = HashMap::from_iter(prim.attributes());
@@ -308,8 +310,8 @@ fn get_geometry() -> Vec<f32> {
   vec
 }
 
-fn get_texcoords() -> &'static [f32] {
-  &[
+fn get_texcoords() -> Vec<f32> {
+  vec![
     // left column front
     0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, // top rung front
     0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, // middle rung front

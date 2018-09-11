@@ -6,11 +6,28 @@ bitflags! {
     const Pos = 0b00000001;
     const Tex = 0b00000010;
     const Nor = 0b00000100;
-    const Col = 0b00000100;
-    const Tan = 0b00000100;
+    const Col = 0b00001000;
+    const Tan = 0b00010000;
     const PosTex = Self::Pos.bits | Self::Tex.bits;
     const PosTexNor = Self::Pos.bits | Self::Tex.bits | Self::Nor.bits;
-    const PosTexNorTan = Self::Pos.bits | Self::Tex.bits | Self::Nor.bits | Self::Tan::bits;
+    const PosTexNorTan = Self::Pos.bits | Self::Tex.bits | Self::Nor.bits | Self::Tan.bits;
+  }
+}
+
+impl VertexFlags {
+  pub fn to_defs(&self) -> String {
+    let mut defs = Vec::new();
+//    let mut defs = String::new();
+    if self.contains(VertexFlags::Tex) {
+      defs.push("#define TEXTURE\n")
+    }
+    if self.contains(VertexFlags::Nor) {
+      defs.push("#define NORMALS\n")
+    }
+    if self.contains(VertexFlags::Col) {
+      defs.push("#define COLOR\n")
+    }
+    defs.join("\n")
   }
 }
 
@@ -18,43 +35,45 @@ pub trait VertexFormat {
   type Buffers;
   const FLAGS: VertexFlags;
 
-  fn create_buffers(program: &ShaderProgram, vertices: &Vec<Self>) -> Self::Buffers where Self: ::std::marker::Sized;
+  fn create_buffers(&self, program: &ShaderProgram) -> Self::Buffers where Self: ::std::marker::Sized;
+  fn vertex_count(&self) -> usize;
 }
 
+#[derive(VertexFormat)]
 pub struct VertexPosTex {
-  pub pos: [f32; 3],
-  pub tex: [f32; 2],
+//  #[vertex(name="a_position", size="3")]
+  pub pos: Vec<f32>,
+//  #[vertex(name="a_texcoord", size="2")]
+  pub tex: Vec<f32>,
 }
 
 pub struct VertexPosTexNor {
-  pub pos: [f32; 3],
-  pub tex: [f32; 2],
-  pub nor: [f32; 3],
+  pub pos: Vec<f32>,
+  pub tex: Vec<f32>,
+  pub nor: Vec<f32>,
 }
 
 impl VertexFormat for VertexPosTex {
   type Buffers = (VBO, VBO);
   const FLAGS: VertexFlags = VertexFlags::PosTex;
 
-  fn create_buffers(program: &ShaderProgram, vertices: &Vec<Self>) -> Self::Buffers {
+  fn create_buffers(&self, program: &ShaderProgram) -> Self::Buffers {
     let pos_buffer = program.create_buffer(AttributeSize::Three, "a_position", DataType::Float);
     let tex_buffer = program.create_buffer(AttributeSize::Two, "a_texcoord", DataType::Float);
 
-    let (positions, tex_coords) = vertices.iter().fold((Vec::new(), Vec::new()), |(mut pos, mut tex), val| {
-      pos.extend_from_slice(&val.pos);
-      tex.extend_from_slice(&val.tex);
-      (pos, tex)
-    });
-
-    pos_buffer.set_data(positions.as_slice());
-    tex_buffer.set_data(tex_coords.as_slice());
+    pos_buffer.set_data_f32(self.pos.as_slice());
+    tex_buffer.set_data_f32(self.tex.as_slice());
 
     (pos_buffer, tex_buffer)
+  }
+
+  fn vertex_count(&self) -> usize {
+    self.pos.len() / 3
   }
 }
 
 pub struct Mesh<V: VertexFormat> {
-  pub vertices: Vec<V>,
+  pub vertices: V,
   pub indices: Vec<u16>,
   pub(crate) vao: WebGLVertexArrayObject,
   pub(crate) buffers: V::Buffers,
@@ -62,11 +81,11 @@ pub struct Mesh<V: VertexFormat> {
 }
 
 impl<V: VertexFormat> Mesh<V> {
-  pub fn new(program: &ShaderProgram, vertices: Vec<V>, indices: Option<Vec<u16>>) -> Self {
-    let indices = indices.unwrap_or((0u16..vertices.len() as u16).collect());
+  pub fn new(program: &ShaderProgram, vertices: V, indices: Option<Vec<u16>>) -> Self {
+    let indices = indices.unwrap_or((0u16..vertices.vertex_count() as u16).collect());
 
     let vao = program.create_vertex_array();
-    let buffers = V::create_buffers(program, &vertices);
+    let buffers = vertices.create_buffers(&program);
 
     let index_buffer = program.gl.create_buffer();
     program.gl.bind_buffer(BufferKind::ElementArray, &index_buffer);
