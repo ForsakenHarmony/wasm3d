@@ -22,6 +22,7 @@ void main() {
   outColor = texture(u_texture, v_texcoord);
   #endif
   #ifdef COLOR
-  outColor = vec4(0,1,0,1);
+  outColor = vec4(v_color.xyz / 255.0, 1.0);
+//  outColor = vec4(1.0, 0.0, 0.0, 1.0);
   #endif
 }

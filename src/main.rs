@@ -23,16 +23,18 @@ mod engine;
 mod util;
 
 use cgmath::{
-  perspective, Deg, EuclideanSpace, Matrix, Matrix4, Point3, Rad, SquareMatrix, Transform, Vector3,
+  perspective, Deg, EuclideanSpace, Matrix, Matrix4, Point3, Rad, SquareMatrix, Transform, Vector3, Zero,
 };
 use gltf::Gltf;
+
+use rand::RngCore;
 
 use engine::{
   run,
   State,
   renderer::{Renderer, Camera},
-  mesh::{Mesh, VertexPosTex},
-  webgl::{WebGLTexture},
+  mesh::{Mesh, VertexPosTex, VertexPosCol},
+  webgl::WebGLTexture,
 };
 use std::collections::HashMap;
 
@@ -52,6 +54,7 @@ fn load_image(buffer: &[u8]) -> Result<(u16, u16, Vec<u8>)> {
 
 struct GameState {
   f: Mesh<VertexPosTex>,
+  fox: Mesh<VertexPosCol>,
   texture: WebGLTexture,
   angle: f32,
   camera: Camera,
@@ -66,8 +69,71 @@ impl State for GameState {
 
     let img = load_image(include_bytes!("../static/f-texture.png"))?;
 
+    let (document, buffers, images) = ::gltf::import_slice(include_bytes!("../static/fox.glb")).unwrap();
+
+    fn read_buffer<T: Copy>(buffers: &Vec<::gltf::buffer::Data>, accessor: &::gltf::Accessor) -> Vec<T> {
+      fn cast<T: Copy>(chunk: &[u8]) -> T {
+        unsafe { *(chunk.as_ptr() as *const T) }
+      }
+
+      let view = accessor.view();
+      let buffer = view.buffer();
+
+      let offset = view.offset();
+      let length = view.length();
+
+      let buffer_slice = &buffers[buffer.index()].0[offset..offset + length];
+
+      let data_type = accessor.data_type();
+
+      use gltf::accessor::DataType::*;
+
+      let type_size = match data_type {
+        I8 => 1,
+        U8 => 1,
+        I16 => 2,
+        U16 => 2,
+        U32 => 4,
+        F32 => 4,
+      };
+
+      buffer_slice.chunks(type_size).map(|chunk| cast(chunk)).collect::<Vec<_>>()
+    }
+
+    let mesh: ::gltf::Mesh = document.meshes().next().unwrap();
+    let prim: ::gltf::Primitive = mesh.primitives().next().unwrap();
+
+    let position_accessor = prim.get(&::gltf::Semantic::Positions).unwrap();
+    let index_accessor = prim.indices().unwrap();
+
+    let pos_buffer = read_buffer::<f32>(&buffers, &position_accessor);
+    let index_buffer = read_buffer::<u16>(&buffers, &index_accessor);
+
+    log(format!("{:#?}\n{:#?}\n{:#?}", pos_buffer.len() / 3, index_buffer.len() / 3, index_buffer));
+
+    let mut col_buffer = vec![0u8; pos_buffer.len() / 3 * 4];
+
+    let mut rng = rand::thread_rng();
+    rng.fill_bytes(&mut col_buffer);
+
+//    let mut index = 0;
+//    for thing in col_buffer.iter_mut() {
+//      index += 1;
+//      if index % 4 == 0 {
+//        *thing = 0;
+//      }
+//    }
+
+    let fox_vertices = VertexPosCol {
+      pos: pos_buffer,
+      col: col_buffer,
+    };
+
+    let fox_mesh = renderer.create_mesh(fox_vertices, Some(index_buffer));
+
     Ok(GameState {
       f: renderer.create_mesh(vertices, None),
+      fox: fox_mesh,
       texture: renderer.create_texture(img.2.as_slice(), img.0, img.1),
       angle: 0.0,
       camera: Camera::perspective(Deg(60.0), renderer.aspect(), 1.0, 2000.0, Point3::origin()),
@@ -97,6 +163,8 @@ impl State for GameState {
 
     renderer.set_projection(self.camera.combined());
 
+    renderer.render_mesh(&self.fox, Matrix4::from_scale(5.0));
+
     for i in 0..num_fs {
       let angle = i as f32 * ::std::f32::consts::PI * 2.0 / num_fs as f32;
 
@@ -125,130 +193,6 @@ pub fn main() {
       console.error(@{format!("{:#?}", info)});
     }
   }));
-
-//  let (document, buffers, images) = load_gltf(include_bytes!("../static/fox.glb")).unwrap();
-  let (document, buffers, images) = ::gltf::import_slice(include_bytes!("../static/fox.glb")).unwrap();
-
-  log(format!("{:#?}", buffers.len()));
-  log(format!("{:#?}", images.len()));
-
-  let thing: ::gltf::Semantic;
-  let thing: ::gltf::Accessor;
-  let thing: ::gltf::Buffer;
-  let thing: ::gltf::buffer::View;
-
-  for buffer in document.buffers() {
-    log(format!("Buffer: {:#?} {:#?} {:#?} {:#?}", buffer.name(), buffer.length(), buffer.index(), buffer.extras()));
-  }
-
-  for view in document.views() {
-    log(format!("View: {:#?} {:#?} {:#?} {:#?} {:#?}", view.name(), view.length(), view.index(), view.offset(), view.extras()));
-  }
-
-  let accessors = document.accessors().map(|acc| {
-    let view = acc.view();
-    let buffer = view.buffer();
-
-    let offset = view.offset();
-    let length = view.length();
-
-    let buffer_slice = &buffers[buffer.index()].0[offset..offset + length];
-
-    use ::gltf::json::accessor::ComponentType::*;
-    use ::gltf::json::accessor::Type::*;
-
-    let data_type = acc.data_type();
-
-    let type_size = match data_type {
-      I8 => 1,
-      U8 => 1,
-      I16 => 2,
-      U16 => 2,
-      U32 => 4,
-      F32 => 4,
-    };
-
-    #[derive(Copy, Clone, Debug)]
-    enum Types {
-      I8(i8),
-      U8(u8),
-      I16(i16),
-      U16(u16),
-      F32(f32),
-      U32(u32),
-    }
-
-    fn cast<T: Copy>(chunk: &[u8]) -> T {
-      unsafe { *(chunk.as_ptr() as *const T) }
-    }
-
-    let typed_buffer = buffer_slice.chunks(type_size).map(|chunk| match data_type {
-      I8 => Types::I8(cast(chunk)),
-      U8 => Types::U8(cast(chunk)),
-      I16 => Types::I16(cast(chunk)),
-      U16 => Types::U16(cast(chunk)),
-      U32 => Types::U32(cast(chunk)),
-      F32 => Types::F32(cast(chunk)),
-    }).collect::<Vec<_>>();
-
-    #[derive(Debug)]
-    enum Container<T: Copy> {
-      Scalar(T),
-      Vec2([T; 2]),
-      Vec3([T; 3]),
-      Vec4([T; 4]),
-      Mat2([[T; 2]; 2]),
-      Mat3([[T; 3]; 3]),
-      Mat4([[T; 4]; 4]),
-    }
-
-    let dimensions = acc.dimensions();
-    let container_size = match dimensions {
-      Scalar => 1,
-      Vec2 => 2,
-      Vec3 => 3,
-      Vec4 => 4,
-      Mat2 => 4,
-      Mat3 => 9,
-      Mat4 => 16,
-    };
-
-    let containers = typed_buffer.chunks(container_size).map(|chunk| match dimensions {
-      Scalar => Container::Scalar(chunk[0]),
-      Vec2 => Container::Vec2([chunk[0], chunk[1]]),
-      Vec3 => Container::Vec3([chunk[0], chunk[1], chunk[2]]),
-      Vec4 => Container::Vec4([chunk[0], chunk[1], chunk[2], chunk[3]]),
-      Mat2 => Container::Mat2([[chunk[0], chunk[1]], [chunk[2], chunk[3]]]),
-      Mat3 => Container::Mat3([[chunk[0], chunk[1], chunk[2]], [chunk[3], chunk[4], chunk[5]], [chunk[6], chunk[7], chunk[8]]]),
-      Mat4 => Container::Mat4([[chunk[0], chunk[1], chunk[2], chunk[3]], [chunk[4], chunk[5], chunk[6], chunk[7]], [chunk[8], chunk[9], chunk[10], chunk[11]], [chunk[12], chunk[13], chunk[14], chunk[15]]]),
-    }).collect::<Vec<_>>();
-
-    containers
-  }).collect::<Vec<_>>();
-
-  log(format!("Accessors: {:#?}", accessors));
-
-  for acc in document.accessors() {
-    log(format!("Accessor: {:#?} {:#?} {:#?} {:#?}", acc.name(), acc.index(), acc.offset(), acc.data_type()));
-  }
-
-  for mesh in document.meshes() {
-    for prim in mesh.primitives() {
-      let position_accessor = prim.get(&::gltf::Semantic::Positions).unwrap();
-
-      //      log(format!("{:#?}", prim));
-      use std::iter::FromIterator;
-      let map: HashMap<::gltf::Semantic, ::gltf::Accessor> = HashMap::from_iter(prim.attributes());
-
-      for (sem, acc) in prim.attributes() {
-        let view = acc.view();
-        let buffer = view.buffer();
-        log(format!("Semantic: {:#?} \nAccessor: {:#?} {:#?} {:#?} {:#?} {:#?}\nView: {:#?} {:#?} {:#?} {:#?} \nBuffer: {:#?}", sem, acc.index(), acc.offset(), acc.data_type(), acc.dimensions(), acc.count(), view.index(), view.offset(), view.length(), view.target(), buffer.index()));
-      }
-    }
-  }
-
-//  log(format!("{:?}", gltf));
 
   run::<GameState>((1280, 720), "Test");
 }

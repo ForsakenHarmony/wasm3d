@@ -117,7 +117,7 @@ impl Renderer {
   }
 
   pub(crate) fn start(&self) {
-    self.gl.enable(Flag::CullFace);
+//    self.gl.enable(Flag::CullFace);
     self.gl.enable(Flag::DepthTest);
   }
 
