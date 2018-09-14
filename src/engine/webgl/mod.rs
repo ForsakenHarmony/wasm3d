@@ -248,6 +248,12 @@ impl WebGL2RenderingContext {
     };
   }
 
+  pub fn vertex_attrib_divisor(&self, index: u32, divisor: u32) {
+    js! {@(no_return)
+      @{self}.vertexAttribDivisor(@{index},@{divisor})
+    };
+  }
+
   pub fn enable_vertex_attrib_array(&self, location: u32) {
     js! {@(no_return)
       @{self}.enableVertexAttribArray(@{location});

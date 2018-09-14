@@ -48,7 +48,8 @@ impl Camera {
   }
 }
 
-pub struct MeshRef(usize);
+#[derive(Copy, Clone, Debug)]
+pub struct MeshRef(usize, TypeId);
 
 pub struct Renderer {
   pub(crate) gl: Rc<WebGL2RenderingContext>,
@@ -57,7 +58,8 @@ pub struct Renderer {
   shaders: HashMap<TypeId, ShaderProgram>,
   active_shader: Option<TypeId>,
   shader_config: ShaderConfig,
-  meshes: Vec<Mesh<VertexFormat>>,
+  meshes: Vec<Mesh<Box<VertexFormat>>>,
+  queue: Vec<(MeshRef, Matrix4<f32>)>,
   texture_index: usize,
 }
 
@@ -75,6 +77,7 @@ impl Renderer {
       active_shader: None,
       shader_config,
       meshes: Vec::new(),
+      queue: Vec::new(),
       texture_index: 0,
     }
   }
@@ -112,13 +115,16 @@ impl Renderer {
     texture
   }
 
-  pub fn create_mesh<V: VertexFormat>(&mut self, vertices: V, indices: Option<Vec<u16>>) -> Mesh<V> where V: Sized + 'static {
+  pub fn create_mesh<V>(&mut self, vertices: V, indices: Option<Vec<u16>>) -> MeshRef
+    where V: VertexFormat + Sized + 'static
+  {
     // get the shader program for the vertex type, or create one
-    let program = self.shaders.entry(TypeId::of::<V>()).or_insert(ShaderProgram::new::<V>(Rc::clone(&self.gl), &self.shader_config));
-    let mesh = Mesh::new(&program, vertices, indices);
-//    self.meshes.push(mesh);
-//    MeshRef(self.meshes.len() - 1)
-    mesh
+    let type_id = TypeId::of::<V>();
+    let program = self.shaders.entry(type_id).or_insert(ShaderProgram::new::<V>(Rc::clone(&self.gl), &self.shader_config));
+    let mesh: Mesh<V> = Mesh::new(&program, vertices, indices);
+    self.meshes.push(Box::new(mesh));
+    MeshRef(self.meshes.len() - 1, type_id)
+//    mesh
   }
 
   pub fn clear(&self, r: f32, g: f32, b: f32, a: f32) {
@@ -143,15 +149,15 @@ impl Renderer {
 ////    self.gl.tex_storage_2d();
 ////    self.gl.tex_image2d(TextureBindPoint::Texture2d, 0, PixelFormat::DepthComponent, 1024, 1024, PixelFormat::DepthComponent, DataType::Float, &[]);
 //    self.gl.tex_storage_2d(TextureKind::Texture2d, 1, Buffers::DepthComponent16, 1024, 1024);
-
-
   }
 
-  pub(crate) fn exec(&self) {
+  pub(crate) fn exec(&self) {}
 
+  pub fn render_mesh(&mut self, mesh: MeshRef, transform: Matrix4<f32>) {
+    self.queue.push((mesh, transform));
   }
 
-  pub fn render_mesh<V: VertexFormat>(&mut self, mesh: &Mesh<V>, transform: Matrix4<f32>) where V: 'static {
+  pub fn render_mesh_<V: VertexFormat>(&mut self, mesh: &Mesh<V>, transform: Matrix4<f32>) where V: 'static {
     let typeid = TypeId::of::<V>();
     let program = self.shaders.get_mut(&TypeId::of::<V>()).expect("There should be a program for a mesh that was previously created with it");
 

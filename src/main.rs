@@ -154,7 +154,7 @@ impl State for GameState {
 
     renderer.set_projection(self.camera.combined());
 
-    renderer.render_mesh(&self.fox, Matrix4::from_scale(5.0));
+    renderer.render_mesh(self.fox, Matrix4::from_scale(5.0));
 
     for i in 0..num_fs {
       let angle = i as f32 * ::std::f32::consts::PI * 2.0 / num_fs as f32;
@@ -164,7 +164,7 @@ impl State for GameState {
 
       let transform = Matrix4::from_translation(Vector3::new(x, 0.0, z));
 
-      renderer.render_mesh(&self.f, transform);
+      renderer.render_mesh(self.f, transform);
     }
 
     Ok(())

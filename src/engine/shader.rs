@@ -144,37 +144,37 @@ impl VAO {
     }
   }
 
-  pub fn vertex_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &Self {
+  pub fn vertex_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
     self.attribute_buffer(attr_index, vertex_buffer, false, false, false);
 
     self
   }
 
-  pub fn instance_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &Self {
+  pub fn instance_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
     self.attribute_buffer(attr_index, vertex_buffer, true, false, false);
 
     self
   }
 
-  pub fn vertex_integer_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &Self {
+  pub fn vertex_integer_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
     self.attribute_buffer(attr_index, vertex_buffer, false, true, false);
 
     self
   }
 
-  pub fn instance_integer_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &Self {
+  pub fn instance_integer_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
     self.attribute_buffer(attr_index, vertex_buffer, true, true, false);
 
     self
   }
 
-  pub fn vertex_normalized_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &Self {
+  pub fn vertex_normalized_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
     self.attribute_buffer(attr_index, vertex_buffer, false, false, true);
 
     self
   }
 
-  pub fn instance_normalized_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &Self {
+  pub fn instance_normalized_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
     self.attribute_buffer(attr_index, vertex_buffer, true, false, true);
 
     self
@@ -202,7 +202,7 @@ impl VAO {
     self
   }
 
-  pub fn attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO, instanced: bool, integer: bool, normalized: bool) -> &Self {
+  pub fn attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO, instanced: bool, integer: bool, normalized: bool) -> &mut Self {
     self.gl.bind_vertex_array(&self.vao);
     self.gl.bind_buffer(vertex_buffer.binding, &vertex_buffer.buffer);
 
@@ -216,15 +216,42 @@ impl VAO {
       DataType::Float => 4,
     };
 
-    self.gl.vertex_attrib_pointer(
-      attr_index,
-      vertex_buffer.item_size,
-      vertex_buffer.ty,
-      false,
-      vertex_buffer.item_size * type_size,
-      vertex_buffer.item_size * type_size,
-    );
-    self.gl.enable_vertex_attrib_array(attr_index);
+    let num_columns = vertex_buffer.num_columns;
+
+    for i in 0..num_columns {
+      if integer {
+        self.gl.vertex_attrib_i_pointer(
+          attr_index + i,
+          vertex_buffer.item_size,
+          vertex_buffer.ty,
+          num_columns * vertex_buffer.item_size * type_size,
+          i * vertex_buffer.item_size * type_size,
+        );
+      } else {
+        self.gl.vertex_attrib_pointer(
+          attr_index + i,
+          vertex_buffer.item_size,
+          vertex_buffer.ty,
+          normalized,
+          num_columns * vertex_buffer.item_size * type_size,
+          i * vertex_buffer.item_size * type_size,
+        );
+      }
+
+      if instanced {
+        self.gl.vertex_attrib_divisor(attr_index + i, 1);
+      }
+
+      self.gl.enable_vertex_attrib_array(attr_index + i);
+    }
+
+    self.instanced = self.instanced || instanced;
+
+    if instanced {
+      self.num_instances = vertex_buffer.num_items;
+    } else {
+      self.num_elements = if self.num_elements != 0 { self.num_elements } else { vertex_buffer.num_items }
+    }
 
     self.gl.unbind_vertex_array();
     self.gl.unbind_buffer(vertex_buffer.binding);
@@ -289,7 +316,7 @@ impl VBO {
       ty,
       item_size,
       num_items: 0, // TODO
-      num_columns: 0, // TODO
+      num_columns: 1, // TODO
       index_array,
       binding,
     };

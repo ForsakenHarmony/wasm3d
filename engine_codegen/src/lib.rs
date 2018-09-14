@@ -151,18 +151,17 @@ pub fn derive_vertex_format(input: TokenStream) -> TokenStream {
 
     let buffer_name = Ident::new(&(name.to_string() + "_buffer"), name.span());
 
-    let buffer = quote! {
-      let #buffer_name = program.create_vertex_buffer(#data_type, #size, self.#name.as_slice());
-      vao.vertex_attribute_buffer(#loc, &#buffer_name);
-    };
+    let buffer = quote!(let #buffer_name = program.create_vertex_buffer(#data_type, #size, self.#name.as_slice()););
+    let buffer_attr = quote!(.vertex_attribute_buffer(#loc, &#buffer_name));
 
-    field_things.push((name, size, buffer_name, buffer))
+    field_things.push((name, size, buffer_name, buffer, buffer_attr))
   }
 
-  let buffers = field_things.iter().map(|(_, _, _, buffer)| buffer).collect::<Vec<_>>();
-  let buffer_names = field_things.iter().map(|(_, _, buffer_name, _)| buffer_name).collect::<Vec<_>>();
+  let buffers = field_things.iter().map(|(_, _, _, buffer, _)| buffer).collect::<Vec<_>>();
+  let buffer_attrs = field_things.iter().map(|(_, _, _, _, buffer_attr)| buffer_attr).collect::<Vec<_>>();
+  let buffer_names = field_things.iter().map(|(_, _, buffer_name, _, _)| buffer_name).collect::<Vec<_>>();
 
-  let (ref first_name, ref first_size, _, _) = field_things[0];
+  let (ref first_name, ref first_size, _, _, _) = field_things[0];
 
   let expanded = quote! {
     impl #impl_generics ::engine::mesh::VertexFormat for #name #ty_generics #where_clause {
@@ -171,12 +170,14 @@ pub fn derive_vertex_format(input: TokenStream) -> TokenStream {
       }
 
       fn create_buffers(&self, program: &ShaderProgram, indices: &[u16]) -> (VAO, Vec<VBO>, VBO) {
-        let mut vao = program.create_vertex_array();
-
         #(#buffers)*
 
         let index_buffer = program.create_index_buffer(DataType::U16, 3, indices);
-        vao.index_buffer(&index_buffer);
+
+        let mut vao = program.create_vertex_array();
+        vao
+          #(#buffer_attrs)*
+          .index_buffer(&index_buffer);
 
         (vao, vec![#(#buffer_names),*], index_buffer)
       }
@@ -186,6 +187,8 @@ pub fn derive_vertex_format(input: TokenStream) -> TokenStream {
       }
     }
   };
+
+//  println!("{}", expanded);
 
   TokenStream::from(expanded)
 }

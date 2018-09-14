@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use super::shader::{VBO, VAO, ShaderProgram};
 use super::webgl::*;
 
@@ -35,9 +37,13 @@ impl VertexFlags {
 }
 
 pub trait VertexFormat {
-  fn flags() -> VertexFlags where Self: Sized;
-  fn create_buffers(&self, program: &ShaderProgram, indices: &[u16]) -> (VAO, Vec<VBO>, VBO);
-  fn vertex_count(&self) -> usize;
+  fn flags() -> VertexFlags where Self: Sized { VertexFlags::empty() }
+  fn create_buffers(&self, program: &ShaderProgram, indices: &[u16]) -> (VAO, Vec<VBO>, VBO) {
+    unreachable!();
+  }
+  fn vertex_count(&self) -> usize {
+    unreachable!();
+  }
 }
 
 #[derive(VertexFormat)]
@@ -69,7 +75,20 @@ pub struct VertexPosTexNor {
   pub nor: Vec<f32>,
 }
 
-pub struct Mesh<V: VertexFormat + ?Sized> {
+struct VertexUnused;
+impl VertexFormat for VertexUnused {}
+
+impl<V> VertexFormat for Box<V> where V: VertexFormat + Sized + 'static {
+  fn flags() -> VertexFlags where Self: Sized { V::flags() }
+  fn create_buffers(&self, program: &ShaderProgram, indices: &[u16]) -> (VAO, Vec<VBO>, VBO) {
+    self.deref().create_buffers(program, indices)
+  }
+  fn vertex_count(&self) -> usize {
+    self.deref().vertex_count()
+  }
+}
+
+pub struct Mesh<V: VertexFormat> {
   pub vertices: Box<V>,
   pub indices: Vec<u16>,
   pub(crate) vao: VAO,
