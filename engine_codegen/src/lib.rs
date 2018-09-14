@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 
-use syn::{DeriveInput, Data, Fields, spanned::Spanned, Attribute, Meta, NestedMeta, Lit, Ident, Type, TypePath, LitInt, IntSuffix};
+use syn::{DeriveInput, Data, Fields, spanned::Spanned, Attribute, Meta, NestedMeta, Lit, Ident, Type, TypePath};
 
 fn get_attr_map(attr: &Attribute) -> Option<(String, HashMap<String, Lit>, Span)> {
   let meta = attr.interpret_meta();
@@ -102,27 +102,23 @@ pub fn derive_vertex_format(input: TokenStream) -> TokenStream {
       None => return emit_error(name.span(), "Missing vertex attribute with `name` and `size`")
     };
 
-    let attribute_name = match attributes.0.get("name") {
+    let loc = match attributes.0.get("loc") {
       Some(name_lit) => match name_lit {
-        Lit::Str(name) => {
-          let name = name.value();
-          quote_spanned!(name_lit.span() => #name)
+        Lit::Int(name) => {
+          name.clone()
         },
-        _ => return emit_error(name_lit.span(), "`name` has to be a string")
+        _ => return emit_error(name_lit.span(), "`name` has to be an int")
       },
       None => return emit_error(attributes.1, "Missing `name` in attribute")
     };
 
-    let (size, size_attrib) = match attributes.0.get("size") {
+    let size = match attributes.0.get("size") {
       Some(size_lit) => match size_lit {
         Lit::Int(size) => {
-          (size.clone(), match size.value() {
-            1 => quote_spanned!(size_lit.span() => AttributeSize::One),
-            2 => quote_spanned!(size_lit.span() => AttributeSize::Two),
-            3 => quote_spanned!(size_lit.span() => AttributeSize::Three),
-            4 => quote_spanned!(size_lit.span() => AttributeSize::Four),
+          match size.value() {
+            1..=4 => size.clone(),
             _ => return emit_error(size_lit.span(), "`size` has to be an int in the range 1..=4")
-          })
+          }
         }
         _ => return emit_error(size_lit.span(), "`size` has to be an int in the range 1..=4")
       },
@@ -135,12 +131,17 @@ pub fn derive_vertex_format(input: TokenStream) -> TokenStream {
     let mut parsed_f32 = parse_macro_input!(tokens_f32 as TypePath);
     let mut parsed_u8 = parse_macro_input!(tokens_u8 as TypePath);
 
-    let (data_type, type_setter) = match field.ty {
+    let data_type = match field.ty {
       Type::Path(ref path) => {
+//        match path {
+//          _ if path == &parsed_f32 => quote!(DataType::Float),
+//          _ if path == &parsed_f32 => quote!(DataType::Float),
+//          _ => return emit_error(field.ty.span(), "Currently only Vec<f32> and Vec<u8> are supported"),
+//        }
         if path == &parsed_f32 {
-          (quote!(DataType::Float), quote!(set_data_f32))
+          quote!(DataType::Float)
         } else if path == &parsed_u8 {
-          (quote!(DataType::U8), quote!(set_data_u8))
+          quote!(DataType::U8)
         } else {
           return emit_error(field.ty.span(), "Currently only Vec<f32> and Vec<u8> are supported")
         }
@@ -148,17 +149,15 @@ pub fn derive_vertex_format(input: TokenStream) -> TokenStream {
       _ => return emit_error(field.ty.span(), "Currently only Vec<f32> and Vec<u8> are supported")
     };
 
-    let buffer_name = Ident::new(&(name.to_string() + "_buffer"), Span::call_site());
+    let buffer_name = Ident::new(&(name.to_string() + "_buffer"), name.span());
 
     let buffer = quote! {
-      let #buffer_name = program.create_buffer(#size_attrib, #attribute_name, #data_type);
-      #buffer_name.#type_setter(self.#name.as_slice());
+      let #buffer_name = program.create_vertex_buffer(#data_type, #size, self.#name.as_slice());
+      vao.vertex_attribute_buffer(#loc, &#buffer_name);
     };
 
     field_things.push((name, size, buffer_name, buffer))
   }
-
-  let buffers_len = LitInt::new(field_things.len() as u64, IntSuffix::None ,Span::call_site());
 
   let buffers = field_things.iter().map(|(_, _, _, buffer)| buffer).collect::<Vec<_>>();
   let buffer_names = field_things.iter().map(|(_, _, buffer_name, _)| buffer_name).collect::<Vec<_>>();
@@ -167,13 +166,19 @@ pub fn derive_vertex_format(input: TokenStream) -> TokenStream {
 
   let expanded = quote! {
     impl #impl_generics ::engine::mesh::VertexFormat for #name #ty_generics #where_clause {
-      type Buffers = [VBO; #buffers_len];
-      const FLAGS: VertexFlags = VertexFlags::#flags;
+      fn flags() -> VertexFlags {
+        VertexFlags::#flags
+      }
 
-      fn create_buffers(&self, program: &ShaderProgram) -> Self::Buffers {
+      fn create_buffers(&self, program: &ShaderProgram, indices: &[u16]) -> (VAO, Vec<VBO>, VBO) {
+        let mut vao = program.create_vertex_array();
+
         #(#buffers)*
 
-        [#(#buffer_names),*]
+        let index_buffer = program.create_index_buffer(DataType::U16, 3, indices);
+        vao.index_buffer(&index_buffer);
+
+        (vao, vec![#(#buffer_names),*], index_buffer)
       }
 
       fn vertex_count(&self) -> usize {

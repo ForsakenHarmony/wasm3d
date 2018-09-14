@@ -476,8 +476,6 @@ pub enum PixelType {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum PixelFormat {
   ///
-  DepthComponent = 0x1902,
-  ///
   Alpha = 0x1906,
   ///
   Rgb = 0x1907,
@@ -487,6 +485,8 @@ pub enum PixelFormat {
   Luminance = 0x1909,
   ///
   LuminanceAlpha = 0x190A,
+  ///
+  DepthComponent = 0x1902,
 }
 
 /// Constants passed to WebGLRenderingContext.hint()

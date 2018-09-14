@@ -1,8 +1,12 @@
 use std::rc::Rc;
+use std::marker::Sized;
+use std::collections::HashMap;
+
 use cgmath::Matrix4;
 
 use super::webgl::*;
 use super::mesh::VertexFormat;
+use super::Result;
 
 fn create_shader(
   gl: &WebGL2RenderingContext,
@@ -44,7 +48,8 @@ impl Default for ShaderConfig {
 pub struct ShaderProgram {
   pub(crate) program: WebGLProgram,
   pub(crate) gl: Rc<WebGL2RenderingContext>,
-  pub(crate) u_matrix: MatrixUniform,
+  pub(crate) u_matrix: Uniform,
+  pub(crate) uniforms: HashMap<String, Uniform>,
 }
 
 impl ShaderProgram {
@@ -52,7 +57,7 @@ impl ShaderProgram {
     gl: Rc<WebGL2RenderingContext>,
     shader_config: &ShaderConfig,
   ) -> Self {
-    let definitions = V::FLAGS.to_defs();
+    let definitions = V::flags().to_defs();
 
     let vert_code = shader_config.vert_code.replace("#{{defs}}", &definitions);
     let frag_code = shader_config.frag_code.replace("#{{defs}}", &definitions);
@@ -62,40 +67,51 @@ impl ShaderProgram {
     let program = create_program(&gl, &vert_shader, &frag_shader);
 
     let location = gl.get_uniform_location(&program, "u_matrix").unwrap();
-    let u_matrix = MatrixUniform::new(Rc::clone(&gl), location);
+    let u_matrix = Uniform::new(Rc::clone(&gl), location);
 
-    ShaderProgram { program, gl, u_matrix }
+    let mut uniforms = HashMap::new();
+
+    let num_uniforms = gl.get_program_parameter(&program, ShaderParameter::ActiveUniforms);
+
+    for i in 0..num_uniforms as u32 {
+      let info = gl.get_active_uniform(&program, i);
+      let handle = gl.get_uniform_location(&program, &info.name()).unwrap();
+
+      let wrapper = Uniform::new(Rc::clone(&gl), handle);
+
+      uniforms.insert(info.name().clone(), wrapper);
+    }
+
+    ShaderProgram { program, gl, u_matrix, uniforms }
   }
 
-  pub fn create_vertex_array(&self) -> WebGLVertexArrayObject {
-    let vao = self.gl.create_vertex_array();
-    self.gl.bind_vertex_array(&vao);
-    vao
+  pub fn create_vertex_array(&self) -> VAO {
+    VAO::new(Rc::clone(&self.gl))
   }
 
-  pub fn create_buffer(
+  pub fn create_vertex_buffer<T: VBOType>(
     &self,
-    size: AttributeSize,
-    attribute: &'static str,
     data_type: DataType,
+    item_size: u32,
+    data: &[T]
   ) -> VBO {
-    let loc = self
-        .gl
-        .get_attrib_location(&self.program, attribute)
-        .unwrap();
-    let buffer = self.gl.create_buffer();
-    self.gl.bind_buffer(BufferKind::Array, &buffer);
-    self.gl.enable_vertex_attrib_array(loc);
-    self
-        .gl
-        .vertex_attrib_pointer(loc, size, data_type, false, 0, 0);
-    self.gl.unbind_buffer(BufferKind::Array);
-    VBO::new(Rc::clone(&self.gl), buffer)
+    VBO::new(Rc::clone(&self.gl), data_type, item_size, data, false)
   }
 
-  pub fn create_uniform<T: Uniform>(&self, name: &'static str) -> T {
-    let location = self.gl.get_uniform_location(&self.program, name).unwrap();
-    T::new(Rc::clone(&self.gl), location)
+  pub fn create_index_buffer<T: VBOType>(
+    &self,
+    data_type: DataType,
+    item_size: u32,
+    data: &[T]
+  ) -> VBO {
+    VBO::new(Rc::clone(&self.gl), data_type, item_size, data, true)
+  }
+
+  pub fn uniform<T: UniformType>(&mut self, name: &'static str, value: T) {
+    match self.uniforms.get_mut(name) {
+      Some(ref uniform) => uniform.set(value),
+      None => {},
+    };
   }
 
   pub fn use_program(&self) {
@@ -103,52 +119,241 @@ impl ShaderProgram {
   }
 }
 
+pub struct VAO {
+  gl: Rc<WebGL2RenderingContext>,
+  vao: WebGLVertexArrayObject,
+  num_elements: u32,
+  indexed: bool,
+  index_type: Option<DataType>,
+  instanced: bool,
+  num_instances: u32,
+}
+
+impl VAO {
+  pub fn new(gl: Rc<WebGL2RenderingContext>) -> Self {
+    let vao = gl.create_vertex_array();
+
+    VAO {
+      gl,
+      vao,
+      num_elements: 0,
+      indexed: false,
+      index_type: None,
+      instanced: false,
+      num_instances: 0,
+    }
+  }
+
+  pub fn vertex_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &Self {
+    self.attribute_buffer(attr_index, vertex_buffer, false, false, false);
+
+    self
+  }
+
+  pub fn instance_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &Self {
+    self.attribute_buffer(attr_index, vertex_buffer, true, false, false);
+
+    self
+  }
+
+  pub fn vertex_integer_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &Self {
+    self.attribute_buffer(attr_index, vertex_buffer, false, true, false);
+
+    self
+  }
+
+  pub fn instance_integer_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &Self {
+    self.attribute_buffer(attr_index, vertex_buffer, true, true, false);
+
+    self
+  }
+
+  pub fn vertex_normalized_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &Self {
+    self.attribute_buffer(attr_index, vertex_buffer, false, false, true);
+
+    self
+  }
+
+  pub fn instance_normalized_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &Self {
+    self.attribute_buffer(attr_index, vertex_buffer, true, false, true);
+
+    self
+  }
+
+  pub fn bind<F>(&self, closure: F)
+    where
+        F: FnOnce() -> () {
+    self.gl.bind_vertex_array(&self.vao);
+    closure();
+    self.gl.unbind_vertex_array();
+  }
+
+  pub fn index_buffer(&mut self, vertex_buffer: &VBO) -> &mut Self {
+    self.gl.bind_vertex_array(&self.vao);
+    self.gl.bind_buffer(vertex_buffer.binding, &vertex_buffer.buffer);
+
+    self.num_elements = vertex_buffer.num_items * 3;
+    self.index_type = Some(vertex_buffer.ty);
+    self.indexed = true;
+
+    self.gl.unbind_vertex_array();
+    self.gl.unbind_buffer(vertex_buffer.binding);
+
+    self
+  }
+
+  pub fn attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO, instanced: bool, integer: bool, normalized: bool) -> &Self {
+    self.gl.bind_vertex_array(&self.vao);
+    self.gl.bind_buffer(vertex_buffer.binding, &vertex_buffer.buffer);
+
+    let type_size = match vertex_buffer.ty {
+      DataType::I8 => 1,
+      DataType::U8 => 1,
+      DataType::I16 => 2,
+      DataType::U16 => 2,
+      DataType::I32 => 4,
+      DataType::U32 => 4,
+      DataType::Float => 4,
+    };
+
+    self.gl.vertex_attrib_pointer(
+      attr_index,
+      vertex_buffer.item_size,
+      vertex_buffer.ty,
+      false,
+      vertex_buffer.item_size * type_size,
+      vertex_buffer.item_size * type_size,
+    );
+    self.gl.enable_vertex_attrib_array(attr_index);
+
+    self.gl.unbind_vertex_array();
+    self.gl.unbind_buffer(vertex_buffer.binding);
+
+    self
+  }
+}
+
+pub enum BufferData {
+  I8(Vec<i8>),
+  U8(Vec<u8>),
+  I16(Vec<i16>),
+  U16(Vec<u16>),
+  I32(Vec<i32>),
+  U32(Vec<u32>),
+  Float(Vec<f32>),
+}
+
+pub trait VBOType {
+  fn set_data(buffer: &VBO, data: &[Self]) where Self: Sized;
+}
+
+impl VBOType for f32 {
+  fn set_data(buffer: &VBO, data: &[Self]) {
+    buffer.gl.buffer_data_f32(buffer.binding, data, DrawMode::Static);
+  }
+}
+
+impl VBOType for u8 {
+  fn set_data(buffer: &VBO, data: &[Self]) {
+    buffer.gl.buffer_data_u8(buffer.binding, data, DrawMode::Static);
+  }
+}
+
+impl VBOType for u16 {
+  fn set_data(buffer: &VBO, data: &[Self]) {
+    buffer.gl.buffer_data_u16(buffer.binding, data, DrawMode::Static);
+  }
+}
 
 pub struct VBO {
-  buffer: WebGLBuffer,
   gl: Rc<WebGL2RenderingContext>,
+  buffer: WebGLBuffer,
+  ty: DataType,
+  item_size: u32,
+  num_items: u32,
+  num_columns: u32,
+  // usage
+  index_array: bool,
+  binding: BufferKind,
 }
 
 impl VBO {
-  pub fn new(gl: Rc<WebGL2RenderingContext>, buffer: WebGLBuffer) -> Self {
-    VBO { buffer, gl }
+  pub fn new<T: VBOType>(gl: Rc<WebGL2RenderingContext>, ty: DataType, item_size: u32, data: &[T], index_array: bool) -> Self {
+    let buffer = gl.create_buffer();
+
+    let binding = if index_array { BufferKind::ElementArray } else { BufferKind::Array };
+
+    let buffer = VBO {
+      gl,
+      buffer,
+      ty,
+      item_size,
+      num_items: 0, // TODO
+      num_columns: 0, // TODO
+      index_array,
+      binding,
+    };
+
+    buffer.set_data(data);
+
+    buffer
   }
 
-  pub fn set_data_f32(&self, data: &[f32]) {
-    self.gl.bind_buffer(BufferKind::Array, &self.buffer);
-    self
-        .gl
-        .buffer_data_f32(BufferKind::Array, data, DrawMode::Static);
+  fn set_data<T: VBOType>(&self, data: &[T]) {
+    self.bind(|| {
+      T::set_data(&self, data);
+    });
   }
 
-  pub fn set_data_u8(&self, data: &[u8]) {
-    self.gl.bind_buffer(BufferKind::Array, &self.buffer);
-    self
-        .gl
-        .buffer_data_u8(BufferKind::Array, data, DrawMode::Static);
+  fn bind<F>(&self, closure: F)
+    where
+        F: FnOnce() -> () {
+    self.gl.bind_buffer(self.binding, &self.buffer);
+    closure();
+    self.gl.unbind_buffer(self.binding);
   }
 }
 
-pub struct MatrixUniform {
-  uniform: WebGLUniformLocation,
+pub struct Uniform {
   gl: Rc<WebGL2RenderingContext>,
+  uniform: WebGLUniformLocation,
 }
 
-pub trait Uniform {
-  type Repr;
-  fn new(gl: Rc<WebGL2RenderingContext>, loc: WebGLUniformLocation) -> Self;
-  fn set(&self, val: Self::Repr);
-}
-
-impl Uniform for MatrixUniform {
-  type Repr = Matrix4<f32>;
-
+impl Uniform {
   fn new(gl: Rc<WebGL2RenderingContext>, uniform: WebGLUniformLocation) -> Self {
-    MatrixUniform { uniform, gl }
+    Uniform { uniform, gl }
   }
 
-  fn set(&self, val: Self::Repr) {
-    self.gl.uniform_matrix_4fv(&self.uniform, val.as_ref());
+  pub fn set<T: UniformType>(&self, val: T) {
+    T::set(&self, val);
   }
 }
+
+pub trait UniformType {
+  fn set(uniform: &Uniform, val: Self);
+}
+
+impl UniformType for Matrix4<f32> {
+  fn set(uniform: &Uniform, val: Self) {
+    uniform.gl.uniform_matrix_4fv(&uniform.uniform, val.as_ref());
+  }
+}
+
+//pub trait Uniform {
+//  type Repr;
+//  fn new(gl: Rc<WebGL2RenderingContext>, loc: WebGLUniformLocation) -> Self;
+//  fn set(&self, val: Self::Repr);
+//}
+//
+//impl Uniform for MatrixUniform {
+//  type Repr = Matrix4<f32>;
+//
+//  fn new(gl: Rc<WebGL2RenderingContext>, uniform: WebGLUniformLocation) -> Self {
+//    MatrixUniform { uniform, gl }
+//  }
+//
+//  fn set(&self, val: Self::Repr) {
+//    self.gl.uniform_matrix_4fv(&self.uniform, val.as_ref());
+//  }
+//}
 

@@ -2,13 +2,16 @@
 
 #{{defs}}
 
-in vec4 a_position;
+layout(location=0) in vec4 a_position;
 
 #ifdef TEXTURE
-in vec2 a_texcoord;
+layout(location=1) in vec2 a_texcoord;
+#endif
+#ifdef NORMAL
+layout(location=2) in vec3 a_normal;
 #endif
 #ifdef COLOR
-in vec4 a_color;
+layout(location=3) in vec4 a_color;
 #endif
 
 uniform mat4 u_matrix;

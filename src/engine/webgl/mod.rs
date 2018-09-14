@@ -51,6 +51,18 @@ impl WebGLActiveInfo {
       kind,
     }
   }
+
+  pub fn name(&self) -> &String {
+    &self.name
+  }
+
+  pub fn size(&self) -> u32 {
+    self.size
+  }
+
+  pub fn kind(&self) -> UniformType {
+    self.kind
+  }
 }
 
 #[derive(Debug, Clone, ReferenceType)]
@@ -204,8 +216,7 @@ impl WebGL2RenderingContext {
     name: &str,
   ) -> Option<WebGLUniformLocation> {
     let value = js! {
-      const res = (@{self}).getUniformLocation(@{program.deref()},@{name});
-      return res;
+      return (@{self}).getUniformLocation(@{program.deref()},@{name});
     };
     value.try_into().ok().map(WebGLUniformLocation)
   }
@@ -213,7 +224,7 @@ impl WebGL2RenderingContext {
   pub fn vertex_attrib_pointer(
     &self,
     location: u32,
-    size: AttributeSize,
+    size: u32,
     kind: DataType,
     normalized: bool,
     stride: u32,
@@ -221,6 +232,19 @@ impl WebGL2RenderingContext {
   ) {
     js! {
       (@{self}).vertexAttribPointer(@{location},@{size as u16},@{kind as i32},@{normalized},@{stride},@{offset});
+    };
+  }
+
+  pub fn vertex_attrib_i_pointer(
+    &self,
+    location: u32,
+    size: u32,
+    kind: DataType,
+    stride: u32,
+    offset: u32,
+  ) {
+    js! {
+      (@{self}).vertexAttribIPointer(@{location},@{size as u16},@{kind as i32},@{stride},@{offset});
     };
   }
 
@@ -276,6 +300,7 @@ impl WebGL2RenderingContext {
     &self,
     target: TextureBindPoint,
     level: u8,
+    internal_format: PixelFormat,
     width: u16,
     height: u16,
     format: PixelFormat,
@@ -284,12 +309,18 @@ impl WebGL2RenderingContext {
   ) {
     js! {@(no_return)
       @{self}.texImage2D(
-        @{target as u32},@{level as u32},@{format as u32},
+        @{target as u32},@{level as u32},@{internal_format as u32},
         @{width as u32},@{height as u32},0,
         @{format as u32},@{kind as u32},
-        @{unsafe { UnsafeTypedArray::new(pixels)} }
+        @{unsafe { UnsafeTypedArray::new(pixels) }}
       );
     };
+  }
+
+  pub fn tex_storage_2d(&self, target: TextureKind, levels: u32, internal_format: Buffers, width: u16, height: u16) {
+    js! {@(no_return)
+      @{self}.texStorage2D(@{target as u32}, @{levels as u32}, @{internal_format as u32}, @{width as u32}, @{height as u32});
+    }
   }
 
   pub fn tex_sub_image2d(
@@ -449,7 +480,7 @@ impl WebGL2RenderingContext {
 
   pub fn unbind_vertex_array(&self) {
     js! {@(no_return)
-      (@{&self}).bindVertexArray(0)
+      (@{&self}).bindVertexArray(null)
     }
   }
 
@@ -517,7 +548,7 @@ impl WebGL2RenderingContext {
 
   pub fn bind_framebuffer(&self, buffer: Buffers, fb: &WebGLFramebuffer) {
     js! {
-      return @{self}.bindFramebuffer(@{fb.deref()})
+      return @{self}.bindFramebuffer(@{buffer as u32}, @{fb})
     }
   }
 
@@ -536,7 +567,7 @@ impl WebGL2RenderingContext {
 
   pub fn unbind_framebuffer(&self, buffer: Buffers) {
     js! {@(no_return)
-      @{self}.bindFramebuffer(@{buffer as u32},null);
+      @{self}.bindFramebuffer(@{buffer as u32}, null);
     }
   }
 }

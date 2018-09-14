@@ -1,4 +1,4 @@
-use super::shader::{VBO, ShaderProgram};
+use super::shader::{VBO, VAO, ShaderProgram};
 use super::webgl::*;
 
 bitflags! {
@@ -35,48 +35,46 @@ impl VertexFlags {
 }
 
 pub trait VertexFormat {
-  type Buffers;
-  const FLAGS: VertexFlags;
-
-  fn create_buffers(&self, program: &ShaderProgram) -> Self::Buffers where Self: ::std::marker::Sized;
+  fn flags() -> VertexFlags where Self: Sized;
+  fn create_buffers(&self, program: &ShaderProgram, indices: &[u16]) -> (VAO, Vec<VBO>, VBO);
   fn vertex_count(&self) -> usize;
 }
 
 #[derive(VertexFormat)]
 #[vertex(flags = "PosTex")]
 pub struct VertexPosTex {
-  #[vertex(name = "a_position", size = 3)]
+  #[vertex(loc = 0, size = 3)]
   pub pos: Vec<f32>,
-  #[vertex(name = "a_texcoord", size = 2)]
+  #[vertex(loc = 1, size = 2)]
   pub tex: Vec<f32>,
 }
 
 #[derive(VertexFormat)]
 #[vertex(flags = "PosCol")]
 pub struct VertexPosCol {
-  #[vertex(name = "a_position", size = 3)]
+  #[vertex(loc = 0, size = 3)]
   pub pos: Vec<f32>,
-  #[vertex(name = "a_color", size = 4)]
+  #[vertex(loc = 3, size = 4)]
   pub col: Vec<u8>,
 }
 
 #[derive(VertexFormat)]
 #[vertex(flags = "PosTexNor")]
 pub struct VertexPosTexNor {
-  #[vertex(name = "a_position", size = 3)]
+  #[vertex(loc = 0, size = 3)]
   pub pos: Vec<f32>,
-  #[vertex(name = "a_texcoord", size = 2)]
+  #[vertex(loc = 1, size = 2)]
   pub tex: Vec<f32>,
-  #[vertex(name = "a_normal", size = 3)]
+  #[vertex(loc = 2, size = 3)]
   pub nor: Vec<f32>,
 }
 
-pub struct Mesh<V: VertexFormat> {
-  pub vertices: V,
+pub struct Mesh<V: VertexFormat + ?Sized> {
+  pub vertices: Box<V>,
   pub indices: Vec<u16>,
-  pub(crate) vao: WebGLVertexArrayObject,
-  pub(crate) buffers: V::Buffers,
-  pub(crate) index_buffer: WebGLBuffer,
+  pub(crate) vao: VAO,
+  pub(crate) buffers: Vec<VBO>,
+  pub(crate) index_buffer: VBO,
 }
 
 impl<V: VertexFormat> Mesh<V> {
@@ -84,14 +82,11 @@ impl<V: VertexFormat> Mesh<V> {
     let indices = indices.unwrap_or((0u16..vertices.vertex_count() as u16).collect());
 
     let vao = program.create_vertex_array();
-    let buffers = vertices.create_buffers(&program);
 
-    let index_buffer = program.gl.create_buffer();
-    program.gl.bind_buffer(BufferKind::ElementArray, &index_buffer);
-    program.gl.buffer_data_u16(BufferKind::ElementArray, indices.as_slice(), DrawMode::Static);
+    let (vao, buffers, index_buffer) = vertices.create_buffers(&program, indices.as_slice());
 
     Mesh {
-      vertices,
+      vertices: Box::new(vertices),
       indices,
       vao,
       buffers,
