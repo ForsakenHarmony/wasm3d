@@ -22,21 +22,21 @@ extern crate engine_codegen;
 mod engine;
 mod util;
 
+use std::collections::HashMap;
+
 use cgmath::{
   perspective, Deg, EuclideanSpace, Matrix, Matrix4, Point3, Rad, SquareMatrix, Transform, Vector3, Zero,
 };
 use gltf::Gltf;
-
 use rand::RngCore;
 
 use engine::{
   run,
   State,
-  renderer::{Renderer, Camera},
+  renderer::{Renderer, Camera, MeshRef},
   mesh::{Mesh, VertexPosTex, VertexPosCol, VertexFormat},
   webgl::WebGLTexture,
 };
-use std::collections::HashMap;
 
 type Result<R> = std::result::Result<R, Box<std::error::Error>>;
 
@@ -53,8 +53,8 @@ fn load_image(buffer: &[u8]) -> Result<(u16, u16, Vec<u8>)> {
 //}
 
 struct GameState {
-  f: Mesh<VertexPosTex>,
-  fox: Mesh<VertexPosCol>,
+  f: MeshRef,
+  fox: MeshRef,
   texture: WebGLTexture,
   angle: f32,
   camera: Camera,
@@ -120,10 +120,10 @@ impl State for GameState {
       pos: pos_buffer,
       col: col_buffer,
     };
-    let fox_mesh = renderer.create_mesh(fox_vertices, Some(index_buffer));
+    let fox_mesh = renderer.create_mesh(Box::new(fox_vertices), Some(index_buffer));
 
     Ok(GameState {
-      f: renderer.create_mesh(vertices, None),
+      f: renderer.create_mesh(Box::new(vertices), None),
       fox: fox_mesh,
       texture: renderer.create_texture(img.2.as_slice(), img.0, img.1),
       angle: 0.0,
@@ -181,7 +181,7 @@ fn log<T: Into<String>>(msg: T) {
 pub fn main() {
   std::panic::set_hook(Box::new(|info: &std::panic::PanicInfo| {
     js! {@(no_return)
-      console.error(@{format!("{:#?}", info)});
+      console.error(@{format!("{}", info)});
     }
   }));
 

@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use super::shader::{VBO, VAO, ShaderProgram};
+use super::renderer::{VBO, VAO, Renderer};
 use super::webgl::*;
 
 bitflags! {
@@ -37,8 +37,8 @@ impl VertexFlags {
 }
 
 pub trait VertexFormat {
-  fn flags() -> VertexFlags where Self: Sized { VertexFlags::empty() }
-  fn create_buffers(&self, program: &ShaderProgram, indices: &[u16]) -> (VAO, Vec<VBO>, VBO) {
+  fn flags(&self) -> VertexFlags { VertexFlags::empty() }
+  fn create_buffers(&self, renderer: &Renderer, indices: &[u16]) -> (VAO, Vec<VBO>, VBO) {
     unreachable!();
   }
   fn vertex_count(&self) -> usize {
@@ -76,36 +76,47 @@ pub struct VertexPosTexNor {
 }
 
 struct VertexUnused;
+
 impl VertexFormat for VertexUnused {}
 
-impl<V> VertexFormat for Box<V> where V: VertexFormat + Sized + 'static {
-  fn flags() -> VertexFlags where Self: Sized { V::flags() }
-  fn create_buffers(&self, program: &ShaderProgram, indices: &[u16]) -> (VAO, Vec<VBO>, VBO) {
-    self.deref().create_buffers(program, indices)
+impl VertexFormat for Box<VertexFormat> {
+  fn flags(&self) -> VertexFlags { self.deref().flags() }
+  fn create_buffers(&self, renderer: &Renderer, indices: &[u16]) -> (VAO, Vec<VBO>, VBO) {
+    self.deref().create_buffers(renderer, indices)
   }
   fn vertex_count(&self) -> usize {
     self.deref().vertex_count()
   }
 }
 
-pub struct Mesh<V: VertexFormat> {
-  pub vertices: Box<V>,
+impl<T: VertexFormat> VertexFormat for Box<T> {
+  fn flags(&self) -> VertexFlags { self.deref().flags() }
+  fn create_buffers(&self, renderer: &Renderer, indices: &[u16]) -> (VAO, Vec<VBO>, VBO) {
+    self.deref().create_buffers(renderer, indices)
+  }
+  fn vertex_count(&self) -> usize {
+    self.deref().vertex_count()
+  }
+}
+
+pub struct Mesh<V: VertexFormat + Sized> {
+  pub vertices: V,
   pub indices: Vec<u16>,
   pub(crate) vao: VAO,
   pub(crate) buffers: Vec<VBO>,
   pub(crate) index_buffer: VBO,
 }
 
-impl<V: VertexFormat> Mesh<V> {
-  pub fn new(program: &ShaderProgram, vertices: V, indices: Option<Vec<u16>>) -> Self {
+impl<V: VertexFormat + Sized> Mesh<V> {
+  pub fn new(renderer: &Renderer, vertices: V, indices: Option<Vec<u16>>) -> Self {
     let indices = indices.unwrap_or((0u16..vertices.vertex_count() as u16).collect());
 
-    let vao = program.create_vertex_array();
+    let vao = renderer.create_vertex_array();
 
-    let (vao, buffers, index_buffer) = vertices.create_buffers(&program, indices.as_slice());
+    let (vao, buffers, index_buffer) = vertices.create_buffers(&renderer, indices.as_slice());
 
     Mesh {
-      vertices: Box::new(vertices),
+      vertices,
       indices,
       vao,
       buffers,

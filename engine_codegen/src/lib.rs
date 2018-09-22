@@ -151,7 +151,7 @@ pub fn derive_vertex_format(input: TokenStream) -> TokenStream {
 
     let buffer_name = Ident::new(&(name.to_string() + "_buffer"), name.span());
 
-    let buffer = quote!(let #buffer_name = program.create_vertex_buffer(#data_type, #size, self.#name.as_slice()););
+    let buffer = quote!(let #buffer_name = renderer.create_vertex_buffer(#data_type, #size, self.#name.as_slice()););
     let buffer_attr = quote!(.vertex_attribute_buffer(#loc, &#buffer_name));
 
     field_things.push((name, size, buffer_name, buffer, buffer_attr))
@@ -165,16 +165,16 @@ pub fn derive_vertex_format(input: TokenStream) -> TokenStream {
 
   let expanded = quote! {
     impl #impl_generics ::engine::mesh::VertexFormat for #name #ty_generics #where_clause {
-      fn flags() -> VertexFlags {
+      fn flags(&self) -> VertexFlags {
         VertexFlags::#flags
       }
 
-      fn create_buffers(&self, program: &ShaderProgram, indices: &[u16]) -> (VAO, Vec<VBO>, VBO) {
+      fn create_buffers(&self, renderer: &Renderer, indices: &[u16]) -> (VAO, Vec<VBO>, VBO) {
         #(#buffers)*
 
-        let index_buffer = program.create_index_buffer(DataType::U16, 3, indices);
+        let index_buffer = renderer.create_index_buffer(DataType::U16, 3, indices);
 
-        let mut vao = program.create_vertex_array();
+        let mut vao = renderer.create_vertex_array();
         vao
           #(#buffer_attrs)*
           .index_buffer(&index_buffer);

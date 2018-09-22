@@ -72,6 +72,8 @@ pub fn run<T: State>(size: (u32, u32), title: &'static str) where T: 'static {
 
     state.render(&mut renderer);
 
+    renderer.exec();
+
     let after = self::app::now();
     frametimes.push((after - before) * 1000.0);
 
