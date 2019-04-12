@@ -1,11 +1,18 @@
-#[path = "web_app.rs"]
-pub mod sys;
+//#[path = "web_app.rs"]
+//pub mod sys;
+pub mod web_app;
+pub use web_app as sys;
 
-#[path = "web_fs.rs"]
-pub mod fs;
+//#[path = "web_fs.rs"]
+//pub mod fs;
+pub mod web_fs;
+pub use web_fs as fs;
 
 pub use self::fs::*;
 pub use self::sys::*;
+
+//use stdweb::
+use stdweb::web::event::MouseButtonsState;
 
 pub struct AppConfig {
   pub title: String,
@@ -104,5 +111,5 @@ pub enum AppEvent {
   KeyDown(KeyDownEvent),
   KeyUp(KeyUpEvent),
   Resized((u32, u32)),
-  MousePos((f64, f64)),
+  MousePos((f64, f64, f64, f64), MouseButtonsState),
 }

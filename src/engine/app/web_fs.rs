@@ -36,8 +36,8 @@ impl FileSystem {
     let on_error = {
       let buffer_state = buffer_state.clone();
       move |s: String| {
-        let msg = format!("Fail to read file from web {}", s);
-        *buffer_state.borrow_mut() = BufferState::Error(msg);
+//        let msg = format!("Fail to read file from web {}", s);
+        *buffer_state.borrow_mut() = BufferState::Error(s);
       }
     };
 

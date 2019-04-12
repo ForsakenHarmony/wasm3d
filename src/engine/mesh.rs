@@ -3,6 +3,8 @@ use std::ops::Deref;
 use super::renderer::{VBO, VAO, Renderer};
 use super::webgl::*;
 
+use bitflags::bitflags;
+
 bitflags! {
   pub struct VertexFlags: u16 {
     const Pos = 0b00000001;

@@ -6,6 +6,8 @@
 #[macro_use]
 extern crate stdweb;
 #[macro_use]
+extern crate engine_codegen;
+#[macro_use]
 extern crate stdweb_derive;
 extern crate serde;
 #[macro_use]
@@ -16,19 +18,16 @@ extern crate rand;
 extern crate gltf;
 #[macro_use]
 extern crate bitflags;
-#[macro_use]
-extern crate engine_codegen;
 
 mod engine;
 mod util;
 
 use std::collections::HashMap;
 
-use cgmath::{
-  perspective, Deg, EuclideanSpace, Matrix, Matrix4, Point3, Rad, SquareMatrix, Transform, Vector3, Zero,
-};
+use cgmath::{perspective, Deg, EuclideanSpace, Matrix, Matrix4, Point3, Rad, SquareMatrix, Transform, Vector3, Zero, Quaternion, Euler, Rotation};
 use gltf::Gltf;
 use rand::RngCore;
+use stdweb::js;
 
 use engine::{
   run,
@@ -37,6 +36,10 @@ use engine::{
   mesh::{Mesh, VertexPosTex, VertexPosCol, VertexFormat},
   webgl::WebGLTexture,
 };
+use crate::engine::app::AppEvent;
+use stdweb::web::event::MouseButton;
+use crate::engine::Ctx;
+use crate::engine::input::Button;
 
 type Result<R> = std::result::Result<R, Box<std::error::Error>>;
 
@@ -56,12 +59,14 @@ struct GameState {
   f: MeshRef,
   fox: MeshRef,
   texture: WebGLTexture,
-  angle: f32,
+  angle_x: f64,
+  angle_y: f64,
   camera: Camera,
+  movement: Vector3<f32>,
 }
 
 impl State for GameState {
-  fn new(renderer: &mut Renderer) -> Result<Self> {
+  fn new(ctx: &mut Ctx) -> Result<Self> {
     let vertices = VertexPosTex {
       pos: get_geometry(),
       tex: get_texcoords(),
@@ -109,7 +114,7 @@ impl State for GameState {
     let pos_buffer = read_buffer::<f32>(&buffers, &position_accessor);
     let index_buffer = read_buffer::<u16>(&buffers, &index_accessor);
 
-    log(format!("{:#?}\n{:#?}\n{:#?}", pos_buffer.len() / 3, index_buffer.len() / 3, index_buffer));
+//    log(format!("{:#?}\n{:#?}\n{:#?}", pos_buffer.len() / 3, index_buffer.len() / 3, index_buffer));
 
     let mut col_buffer = vec![0u8; pos_buffer.len() / 3 * 4];
 
@@ -120,19 +125,60 @@ impl State for GameState {
       pos: pos_buffer,
       col: col_buffer,
     };
-    let fox_mesh = renderer.create_mesh(Box::new(fox_vertices), Some(index_buffer));
+    let fox_mesh = ctx.renderer().create_mesh(Box::new(fox_vertices), Some(index_buffer));
 
     Ok(GameState {
-      f: renderer.create_mesh(Box::new(vertices), None),
+      f: ctx.renderer().create_mesh(Box::new(vertices), None),
       fox: fox_mesh,
-      texture: renderer.create_texture(img.2.as_slice(), img.0, img.1),
-      angle: 0.0,
-      camera: Camera::perspective(Deg(60.0), renderer.aspect(), 1.0, 2000.0, Point3::origin()),
+      texture: ctx.renderer().create_texture(img.2.as_slice(), img.0, img.1),
+      angle_x: 0.0,
+      angle_y: 0.0,
+      camera: Camera::perspective(Deg(60.0), ctx.renderer().aspect(), 1.0, 2000.0, Point3::new(0.0, 0.0, 0.0)),
+      movement: Vector3::new(0.,0.,0.),
     })
   }
 
-  fn update(&mut self, delta: f64) -> Result<()> {
-    self.angle = (self.angle + 10.0 * delta as f32) % 360.0;
+  fn update(&mut self, delta: f64, ctx: &Ctx) -> Result<()> {
+    let mouse_down = ctx.input().is_down(Button::LeftMouse);
+    let (dx, dy) = ctx.input().mouse_delta();
+
+//    log(format!("{:#?}", ctx.input()));
+
+    if mouse_down {
+      self.angle_x = (self.angle_x + (dx * 0.1)) % 360.0;
+      self.angle_y = (self.angle_y + (dy * 0.1)) % 360.0;
+    }
+
+//    log(format!("({:.2}, {:.2})", self.angle_x, self.angle_y));
+
+    let right = ctx.input().is_down(Button::D);
+    let left = ctx.input().is_down(Button::A);
+    let forward = ctx.input().is_down(Button::W);
+    let back = ctx.input().is_down(Button::S);
+    let up = ctx.input().is_down(Button::E);
+    let down = ctx.input().is_down(Button::Q);
+
+    let movement = Vector3::new(
+      if left && !right { 1.0 } else if right && !left { -1.0 } else { 0.0 },
+      if up && !down { -1.0 } else if down && !up { 1.0 } else { 0.0 },
+      if forward && !back { 1.0 } else if back && !forward { -1.0 } else { 0.0 },
+    );
+
+    let rot = Quaternion::from(
+      Euler::new(
+        Deg(self.angle_y as f32),
+        Deg(self.angle_x as f32),
+        Deg(0.0)
+      )
+    );
+    let cam_rotation: Matrix4<f32> = Matrix4::from(rot);
+
+    let movement = rot.invert().rotate_vector(movement * 60.0 * delta as f32);
+    let cam_pos = Matrix4::from_translation(movement).transform_point(self.camera.get_pos());
+
+    self.camera.set_pos(cam_pos);
+    self.camera.set_view(Matrix4::from(rot) * Matrix4::from_translation(self.camera.get_pos().to_homogeneous().truncate()));
+
     Ok(())
   }
 
@@ -142,19 +188,11 @@ impl State for GameState {
     let num_fs = 5;
     let radius = 200.0;
 
-    let f_pos = Point3::new(radius, 0.0, 0.0);
-
-    let camera_matrix = Matrix4::from_angle_y(Deg(self.angle))
-        * Matrix4::from_translation(Vector3::new(0.0, 50.0, radius * 1.5));
-    let cam_pos = camera_matrix.transform_point(Point3::origin());
-
-    self.camera.set_pos(cam_pos);
-    self.camera.look_at(f_pos);
-    self.camera.update();
-
     renderer.set_projection(self.camera.combined());
 
     renderer.render_mesh(self.fox, Matrix4::from_scale(5.0));
+
+    renderer.gl.bind_texture(&self.texture);
 
     for i in 0..num_fs {
       let angle = i as f32 * ::std::f32::consts::PI * 2.0 / num_fs as f32;
@@ -180,9 +218,9 @@ fn log<T: Into<String>>(msg: T) {
 #[cfg(target_arch = "wasm32")]
 pub fn main() {
   std::panic::set_hook(Box::new(|info: &std::panic::PanicInfo| {
-    js! {@(no_return)
-      console.error(@{format!("{}", info)});
-    }
+//    js! {@(no_return)
+//      console.error(@{format!("{:#?}", info)});
+//    }
   }));
 
   run::<GameState>((1280, 720), "Test");

@@ -1,4 +1,3 @@
-use stdweb;
 use super::AppConfig;
 
 use stdweb::traits::IEvent;
@@ -162,13 +161,15 @@ impl App {
       let canvas_y: f64 = js! { return @{&canvas}.getBoundingClientRect().top; }
         .try_into()
         .unwrap();
-      map_event! {
-        self.events,
-        MouseMoveEvent,
-        MousePos,
-        e,
-        (e.client_x() as f64 - canvas_x,e.client_y() as f64 - canvas_y),
-        true
+      let events = (self.events).clone();
+      move |e: MouseMoveEvent| {
+        e.prevent_default();
+        events.borrow_mut().push(
+          AppEvent::MousePos(
+            (e.offset_x(), e.offset_y(), e.movement_x() as f64, e.movement_y() as f64),
+            e.buttons()
+          )
+        );
       }
     });
 

@@ -2,23 +2,25 @@
 name = "wasm3d"
 version = "0.1.0"
 authors = ["Leah <me@hrmny.pw>"]
+edition = "2018"
 
 [dependencies]
 stdweb = "0.4"
-stdweb-derive = "0.4"
+stdweb-derive = "0.5"
 serde = "1.0"
 serde_derive = "1.0"
 rand = { version ="0.5", features=["stdweb"] }
-cgmath = "0.16"
-gltf = "0.11.2"
-bitflags = "1.0.4"
+cgmath = "0.17"
+nalgebra = "0.17"
+gltf = "0.11"
+bitflags = "1.0"
 
 [dependencies.engine_codegen]
 version = "*"
 path = "./engine_codegen"
 
 [dependencies.image]
-version = "0.19"
+version = "0.21"
 default-features = false
 features = ["png_codec", "tga", "jpeg"]
 
@@ -27,3 +29,8 @@ webgl_generator = "0.1.0"
 
 [patch.crates-io]
 gltf = { git = "https://github.com/ForsakenHarmony/gltf.git" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"

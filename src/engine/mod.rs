@@ -6,31 +6,53 @@ pub mod webgl;
 pub mod mesh;
 pub mod renderer;
 pub mod shader;
+pub mod input;
 
 use cgmath::{
   perspective, Deg, EuclideanSpace, Matrix, Matrix4, Point3, Rad, SquareMatrix, Transform, Vector3,
 };
-use engine::app::App as WebApp;
-use engine::app::*;
-use engine::webgl::*;
+use crate::engine::app::App as WebApp;
+use crate::engine::app::*;
+use crate::engine::webgl::*;
 use std::collections::HashMap;
 use std::panic;
 use std::rc::Rc;
 use std::any::TypeId;
 
-use self::mesh::{Mesh, VertexFormat};
-use self::renderer::{Camera, Renderer};
-use self::shader::ShaderConfig;
+use crate::engine::mesh::{Mesh, VertexFormat};
+use crate::engine::renderer::{Camera, Renderer};
+use crate::engine::shader::ShaderConfig;
+use crate::engine::app::AppEvent::MouseDown;
+use crate::engine::input::Input;
 
-type Result<R> = ::std::result::Result<R, Box<::std::error::Error>>;
-
-
+pub type Result<R> = std::result::Result<R, Box<::std::error::Error>>;
 
 pub trait State {
-  fn new(renderer: &mut Renderer) -> Result<Self> where Self: ::std::marker::Sized;
-  fn update(&mut self, delta: f64) -> Result<()>;
+  fn new(renderer: &mut Ctx) -> Result<Self> where Self: ::std::marker::Sized;
+  fn update(&mut self, delta: f64, ctx: &Ctx) -> Result<()>;
   fn render(&mut self, renderer: &mut Renderer) -> Result<()>;
-  fn event(&mut self, event: AppEvent) -> Result<()> { Ok(()) }
+}
+
+pub struct Ctx {
+  renderer: Renderer,
+  input: Input,
+}
+
+impl Ctx {
+  pub fn new(renderer: Renderer) -> Self {
+    Ctx {
+      renderer,
+      input: Input::new()
+    }
+  }
+
+  pub fn renderer(&mut self) -> &mut Renderer {
+    &mut self.renderer
+  }
+
+  pub fn input(&self) -> &Input {
+    &self.input
+  }
 }
 
 pub fn run<T: State>(size: (u32, u32), title: &'static str) where T: 'static {
@@ -42,12 +64,10 @@ pub fn run<T: State>(size: (u32, u32), title: &'static str) where T: 'static {
 
   let aspect = size.0 as f32 / size.1 as f32;
 
-  let vert_code = include_str!("./shaders/vert.glsl");
-  let frag_code = include_str!("./shaders/frag.glsl");
-
   let mut renderer = Renderer::new(Rc::clone(&gl), size, ShaderConfig::default());
+  let mut ctx = Ctx::new(renderer);
 
-  let mut state = T::new(&mut renderer).unwrap();
+  let mut state = T::new(&mut ctx).unwrap();
 
   let mut start = 0.0;
   let mut last = 0.0;
@@ -60,19 +80,20 @@ pub fn run<T: State>(size: (u32, u32), title: &'static str) where T: 'static {
 
     let before = self::app::now();
 
+    ctx.input.flush();
     for event in app.events.borrow_mut().drain(..) {
-      state.event(event);
+      ctx.input.handle_event(event);
     }
 
-    state.update(delta);
+    state.update(delta, &ctx);
 
     gl.viewport(0, 0, size.0, size.1);
 
-    renderer.start();
+    ctx.renderer().start();
 
-    state.render(&mut renderer);
+    state.render(ctx.renderer());
 
-    renderer.exec();
+    ctx.renderer().exec();
 
     let after = self::app::now();
     frametimes.push((after - before) * 1000.0);
@@ -94,7 +115,7 @@ pub fn run<T: State>(size: (u32, u32), title: &'static str) where T: 'static {
       let fps = count / time;
       start = after;
 
-      renderer.gl.log(format!("FPS: {}\tFrametime: {:.2}ms (min: {:.2}ms, max: {:.2}ms)", fps as u32, avg, min, max));
+//      ctx.renderer().gl.log(format!("FPS: {}\tFrametime: {:.2}ms (min: {:.2}ms, max: {:.2}ms)", fps as u32, avg, min, max));
     };
   });
 }

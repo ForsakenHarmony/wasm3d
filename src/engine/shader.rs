@@ -39,8 +39,8 @@ pub struct ShaderConfig {
 impl Default for ShaderConfig {
   fn default() -> Self {
     ShaderConfig {
-      vert_code: include_str!("./shaders/vert.glsl"),
-      frag_code: include_str!("./shaders/frag.glsl"),
+      vert_code: include_str!("shaders/main_vert.glsl"),
+      frag_code: include_str!("shaders/main_frag.glsl"),
     }
   }
 }
@@ -48,7 +48,6 @@ impl Default for ShaderConfig {
 pub struct ShaderProgram {
   pub(crate) program: WebGLProgram,
   pub(crate) gl: Rc<WebGL2RenderingContext>,
-  pub(crate) u_matrix: Uniform,
   pub(crate) uniforms: HashMap<String, Uniform>,
 }
 
@@ -67,9 +66,6 @@ impl ShaderProgram {
     let frag_shader = create_shader(&gl, ShaderKind::Fragment, frag_code);
     let program = create_program(&gl, &vert_shader, &frag_shader);
 
-    let location = gl.get_uniform_location(&program, "u_matrix").unwrap();
-    let u_matrix = Uniform::new(Rc::clone(&gl), location);
-
     let mut uniforms = HashMap::new();
 
     let num_uniforms = gl.get_program_parameter(&program, ShaderParameter::ActiveUniforms);
@@ -83,7 +79,7 @@ impl ShaderProgram {
       uniforms.insert(info.name().clone(), wrapper);
     }
 
-    ShaderProgram { program, gl, u_matrix, uniforms }
+    ShaderProgram { program, gl, uniforms }
   }
 
   pub fn uniform<T: UniformType>(&mut self, name: &'static str, value: T) {

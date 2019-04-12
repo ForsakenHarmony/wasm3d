@@ -1,12 +1,9 @@
 #![recursion_limit = "1000"]
 #![feature(proc_macro_diagnostic)]
-
-extern crate proc_macro2;
 extern crate proc_macro;
-#[macro_use]
-extern crate quote;
-#[macro_use]
-extern crate syn;
+
+use quote::quote;
+use syn::{parse_macro_input};
 
 use std::collections::HashMap;
 
@@ -128,8 +125,8 @@ pub fn derive_vertex_format(input: TokenStream) -> TokenStream {
     let tokens_f32 = quote!(Vec<f32>).into();
     let tokens_u8 = quote!(Vec<u8>).into();
 
-    let mut parsed_f32 = parse_macro_input!(tokens_f32 as TypePath);
-    let mut parsed_u8 = parse_macro_input!(tokens_u8 as TypePath);
+    let parsed_f32 = parse_macro_input!(tokens_f32 as TypePath);
+    let parsed_u8 = parse_macro_input!(tokens_u8 as TypePath);
 
     let data_type = match field.ty {
       Type::Path(ref path) => {
@@ -152,7 +149,7 @@ pub fn derive_vertex_format(input: TokenStream) -> TokenStream {
     let buffer_name = Ident::new(&(name.to_string() + "_buffer"), name.span());
 
     let buffer = quote!(let #buffer_name = renderer.create_vertex_buffer(#data_type, #size, self.#name.as_slice()););
-    let buffer_attr = quote!(.vertex_attribute_buffer(#loc, &#buffer_name));
+    let buffer_attr = quote!(.attribute_buffer(#loc, &#buffer_name, false, false, false));
 
     field_things.push((name, size, buffer_name, buffer, buffer_attr))
   }
@@ -164,7 +161,7 @@ pub fn derive_vertex_format(input: TokenStream) -> TokenStream {
   let (ref first_name, ref first_size, _, _, _) = field_things[0];
 
   let expanded = quote! {
-    impl #impl_generics ::engine::mesh::VertexFormat for #name #ty_generics #where_clause {
+    impl #impl_generics self::VertexFormat for #name #ty_generics #where_clause {
       fn flags(&self) -> VertexFlags {
         VertexFlags::#flags
       }

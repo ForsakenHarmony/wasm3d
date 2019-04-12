@@ -14,18 +14,21 @@ pub struct Camera {
   proj: Matrix4<f32>,
   view: Matrix4<f32>,
   pos: Point3<f32>,
+  target: Point3<f32>,
   view_proj: Matrix4<f32>,
 }
 
 impl Camera {
   pub fn perspective(fov: Deg<f32>, aspect: f32, near: f32, far: f32, pos: Point3<f32>) -> Self {
     let proj = perspective(fov, aspect, near, far);
-    let view = Matrix4::look_at(pos, Point3::origin(), Vector3::unit_y());
+    let target = Point3::origin();
+    let view = Matrix4::look_at(pos, target, Vector3::unit_y());
     let view_proj = proj * view;
 
     Camera {
       proj,
       pos,
+      target,
       view,
       view_proj,
     }
@@ -36,16 +39,30 @@ impl Camera {
   }
 
   pub fn look_at(&mut self, target: Point3<f32>) {
-    self.view = Matrix4::look_at(self.pos, target, Vector3::unit_y());
+    self.target = target;
   }
 
   pub fn set_pos(&mut self, pos: Point3<f32>) {
     self.pos = pos;
   }
 
-  pub fn update(&mut self) {
+  pub fn get_pos(&self) -> Point3<f32> {
+    self.pos
+  }
+
+  pub fn set_view(&mut self, view: Matrix4<f32>) {
+    self.view = view;
     self.view_proj = self.proj * self.view;
   }
+
+  pub fn update(&mut self) {
+    self.view = Matrix4::look_at(self.pos, self.target, Vector3::unit_y());
+    self.view_proj = self.proj * self.view;
+  }
+}
+
+struct Light {
+  cam: Camera,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -107,7 +124,7 @@ impl Renderer {
       height,
       PixelFormat::Rgba,
       DataType::U8,
-      pixels,
+      Some(pixels),
     );
     // gl.generate_mipmap(TextureKind::Texture2d);
     texture
@@ -128,8 +145,7 @@ impl Renderer {
 
   pub fn clear(&self, r: f32, g: f32, b: f32, a: f32) {
     self.gl.clear_color(r, g, b, a);
-    self.gl.clear(BufferBit::Color);
-    self.gl.clear(BufferBit::Depth);
+    self.gl.clear(BufferBit::Color as u32 | BufferBit::Depth as u32 | BufferBit::Stencil as u32);
   }
 
   pub(crate) fn start(&self) {
@@ -140,14 +156,16 @@ impl Renderer {
 
     let depth_texture = self.gl.create_texture();
 
-
-//    self.gl.bind_framebuffer(Buffers::Framebuffer, &fb);
-
-//    let depth_texture = self.gl.create_texture();
-//    self.gl.bind_texture(&depth_texture);
+    self.gl.bind_framebuffer(Buffers::Framebuffer, &fb);
+//
+    let depth_texture = self.gl.create_texture();
+    self.gl.bind_texture(&depth_texture);
+    self.gl.tex_image2d(TextureBindPoint::Texture2d, 0, PixelFormat::Rgb, 1024, 1024, PixelFormat::Rgb, DataType::U8, None);
 ////    self.gl.tex_storage_2d();
 ////    self.gl.tex_image2d(TextureBindPoint::Texture2d, 0, PixelFormat::DepthComponent, 1024, 1024, PixelFormat::DepthComponent, DataType::Float, &[]);
 //    self.gl.tex_storage_2d(TextureKind::Texture2d, 1, Buffers::DepthComponent16, 1024, 1024);
+    self.gl.unbind_texture();
+    self.gl.unbind_framebuffer(Buffers::Framebuffer);
   }
 
   pub(crate) fn exec(&mut self) {
@@ -170,7 +188,7 @@ impl Renderer {
 
         let mesh: &Mesh<_> = self.meshes.get(*id).unwrap();
 
-        active_shader.uniform("u_matrix", self.projection * transform);
+        active_shader.uniform("u_mvp", self.projection * transform);
 
         mesh.vao.bind(|| {
           self.gl.draw_elements(Primitives::Triangles, mesh.indices.len(), DataType::U16, 0);
@@ -184,24 +202,6 @@ impl Renderer {
   pub fn render_mesh(&mut self, mesh: MeshRef, transform: Matrix4<f32>) {
     self.queue.push((mesh, transform));
   }
-
-//  pub fn render_mesh_<V: VertexFormat>(&mut self, mesh: &Mesh<V>, transform: Matrix4<f32>) where V: 'static {
-//    let typeid = TypeId::of::<V>();
-//    let program = self.shaders.get_mut(&TypeId::of::<V>()).expect("There should be a program for a mesh that was previously created with it");
-//
-//    if let Some(active) = self.active_shader {
-//      if active != typeid {
-//        program.use_program();
-//      }
-//    } else {
-//      program.use_program();
-//    }
-//    program.u_matrix.set(self.projection * transform);
-//
-//    mesh.vao.bind(|| {
-//      self.gl.draw_elements(Primitives::Triangles, mesh.indices.len(), DataType::U16, 0);
-//    });
-//  }
 
   pub fn create_vertex_array(&self) -> VAO {
     VAO::new(Rc::clone(&self.gl))
@@ -224,6 +224,10 @@ impl Renderer {
   ) -> VBO {
     VBO::new(Rc::clone(&self.gl), data_type, item_size, data, true)
   }
+}
+
+pub struct Texture {
+  texture: WebGLTexture,
 }
 
 
@@ -252,41 +256,41 @@ impl VAO {
     }
   }
 
-  pub fn vertex_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
-    self.attribute_buffer(attr_index, vertex_buffer, false, false, false);
-
-    self
-  }
-
-  pub fn instance_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
-    self.attribute_buffer(attr_index, vertex_buffer, true, false, false);
-
-    self
-  }
-
-  pub fn vertex_integer_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
-    self.attribute_buffer(attr_index, vertex_buffer, false, true, false);
-
-    self
-  }
-
-  pub fn instance_integer_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
-    self.attribute_buffer(attr_index, vertex_buffer, true, true, false);
-
-    self
-  }
-
-  pub fn vertex_normalized_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
-    self.attribute_buffer(attr_index, vertex_buffer, false, false, true);
-
-    self
-  }
-
-  pub fn instance_normalized_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
-    self.attribute_buffer(attr_index, vertex_buffer, true, false, true);
-
-    self
-  }
+//  pub fn vertex_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
+//    self.attribute_buffer(attr_index, vertex_buffer, false, false, false);
+//
+//    self
+//  }
+//
+//  pub fn instance_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
+//    self.attribute_buffer(attr_index, vertex_buffer, true, false, false);
+//
+//    self
+//  }
+//
+//  pub fn vertex_integer_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
+//    self.attribute_buffer(attr_index, vertex_buffer, false, true, false);
+//
+//    self
+//  }
+//
+//  pub fn instance_integer_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
+//    self.attribute_buffer(attr_index, vertex_buffer, true, true, false);
+//
+//    self
+//  }
+//
+//  pub fn vertex_normalized_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
+//    self.attribute_buffer(attr_index, vertex_buffer, false, false, true);
+//
+//    self
+//  }
+//
+//  pub fn instance_normalized_attribute_buffer(&mut self, attr_index: u32, vertex_buffer: &VBO) -> &mut Self {
+//    self.attribute_buffer(attr_index, vertex_buffer, true, false, true);
+//
+//    self
+//  }
 
   pub fn bind<F>(&self, closure: F)
     where
@@ -368,35 +372,25 @@ impl VAO {
   }
 }
 
-pub enum BufferData {
-  I8(Vec<i8>),
-  U8(Vec<u8>),
-  I16(Vec<i16>),
-  U16(Vec<u16>),
-  I32(Vec<i32>),
-  U32(Vec<u32>),
-  Float(Vec<f32>),
-}
-
 pub trait VBOType {
   fn set_data(buffer: &VBO, data: &[Self]) where Self: Sized;
 }
 
 impl VBOType for f32 {
   fn set_data(buffer: &VBO, data: &[Self]) {
-    buffer.gl.buffer_data_f32(buffer.binding, data, DrawMode::Static);
+    buffer.gl.buffer_data(buffer.binding, data, DrawMode::Static);
   }
 }
 
 impl VBOType for u8 {
   fn set_data(buffer: &VBO, data: &[Self]) {
-    buffer.gl.buffer_data_u8(buffer.binding, data, DrawMode::Static);
+    buffer.gl.buffer_data(buffer.binding, data, DrawMode::Static);
   }
 }
 
 impl VBOType for u16 {
   fn set_data(buffer: &VBO, data: &[Self]) {
-    buffer.gl.buffer_data_u16(buffer.binding, data, DrawMode::Static);
+    buffer.gl.buffer_data(buffer.binding, data, DrawMode::Static);
   }
 }
 

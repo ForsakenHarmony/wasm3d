@@ -4,6 +4,8 @@
     Documentation taken from https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Constants
 */
 
+use std::ops::BitOr;
+
 /// Constants passed to WebGLRenderingContext.vertexAttribPointer()
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum AttributeSize {
@@ -128,6 +130,22 @@ pub enum BufferBit {
   /// Passed to clear to clear the current color buffer.
   Color = 0x00004000,
 }
+
+//impl BitOr for BufferBit {
+//  type Output = u32;
+//
+//  fn bitor(self, rhs: BufferBit) -> Self::Output {
+//    self | rhs
+//  }
+//}
+//
+//impl BitOr<u32> for BufferBit {
+//  type Output = u32;
+//
+//  fn bitor(self, rhs: u32) -> Self::Output {
+//    self | rhs
+//  }
+//}
 
 /// Passed to drawElements or drawArrays to draw primitives.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

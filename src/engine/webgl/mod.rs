@@ -3,14 +3,18 @@ pub mod glenum;
 pub use self::glenum::*;
 
 use std::ops::Deref;
-use stdweb::unstable::{TryFrom, TryInto};
-use stdweb::web::html_element::CanvasElement;
-use stdweb::web::*;
-use stdweb::InstanceOf;
-use stdweb::Reference;
-use stdweb::UnsafeTypedArray;
-
+use stdweb::{
+  web::*,
+  web::html_element::CanvasElement,
+  unstable::{TryFrom, TryInto},
+  private::{JsSerializeOwned},
+  InstanceOf,
+  JsSerialize,
+  Reference,
+  UnsafeTypedArray
+};
 use std::ops::{Add, Sub, Mul, Div};
+use crate::engine::webgl::glenum::PixelType::UnsignedByte;
 
 #[derive(Debug, Clone, ReferenceType)]
 #[reference(instance_of = "WebGL2RenderingContext")]
@@ -111,19 +115,7 @@ impl WebGL2RenderingContext {
     }
   }
 
-  pub fn buffer_data_u8(&self, kind: BufferKind, data: &[u8], draw: DrawMode) {
-    js! {@(no_return)
-      (@{&self}).bufferData(@{kind as u32},@{ unsafe { UnsafeTypedArray::new(data) } }, @{draw as u32});
-    };
-  }
-
-  pub fn buffer_data_u16(&self, kind: BufferKind, data: &[u16], draw: DrawMode) {
-    js! {@(no_return)
-      (@{&self}).bufferData(@{kind as u32},@{ unsafe { UnsafeTypedArray::new(data) } }, @{draw as u32});
-    };
-  }
-
-  pub fn buffer_data_f32(&self, kind: BufferKind, data: &[f32], draw: DrawMode) {
+  pub fn buffer_data<'a, T>(&self, kind: BufferKind, data: &'a [T], draw: DrawMode) where UnsafeTypedArray<'a, T>: JsSerialize {
     js! {@(no_return)
       (@{&self}).bufferData(@{kind as u32},@{ unsafe { UnsafeTypedArray::new(data) } }, @{draw as u32});
     };
@@ -272,9 +264,9 @@ impl WebGL2RenderingContext {
     };
   }
 
-  pub fn clear(&self, bit: BufferBit) {
+  pub fn clear(&self, bit: u32) {
     js! {@(no_return)
-      (@{self}).clear(@{bit as i32});
+      (@{self}).clear(@{bit});
     };
   }
 
@@ -311,14 +303,15 @@ impl WebGL2RenderingContext {
     height: u16,
     format: PixelFormat,
     kind: DataType,
-    pixels: &[u8],
+    pixels: Option<&[u8]>,
   ) {
+    let pixels = pixels.map(|p| unsafe { UnsafeTypedArray::new(p) });
     js! {@(no_return)
       @{self}.texImage2D(
         @{target as u32},@{level as u32},@{internal_format as u32},
         @{width as u32},@{height as u32},0,
         @{format as u32},@{kind as u32},
-        @{unsafe { UnsafeTypedArray::new(pixels) }}
+        @{pixels}
       );
     };
   }

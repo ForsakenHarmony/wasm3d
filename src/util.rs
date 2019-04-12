@@ -1,4 +1,4 @@
-use engine::mesh::VertexPosTexNor;
+use crate::engine::mesh::VertexPosTexNor;
 use cgmath::Vector3;
 
 fn create_box(dimensions: Option<Vector3<f32>>, position: Option<Vector3<f32>>) -> VertexPosTexNor {
