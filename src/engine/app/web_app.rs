@@ -2,10 +2,7 @@ use super::AppConfig;
 
 use stdweb::traits::IEvent;
 use stdweb::unstable::TryInto;
-use stdweb::web::event::{
-  IKeyboardEvent, IMouseEvent, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent,
-  MouseMoveEvent, MouseUpEvent, ResizeEvent,
-};
+use stdweb::web::event::{IKeyboardEvent, IMouseEvent, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ResizeEvent, PointerMoveEvent};
 use stdweb::web::html_element::CanvasElement;
 use stdweb::web::window;
 use stdweb::web::IEventTarget;
@@ -24,21 +21,19 @@ pub struct App {
 
 use super::events;
 
-macro_rules! map_event {
-  ($events:expr, $x:ident, $y:ident, $ee:ident, $e:expr, $prevent:expr) => {{
+macro_rules! map_events {
+  (|$event:ident: $typ:ident| { ($events:expr) < $out:expr }) => {{
     let events = $events.clone();
-    move |$ee: $x| {
-      if $prevent {
-        $ee.prevent_default();
-      }
-      events.borrow_mut().push(AppEvent::$y($e));
+    move |$event: $typ| {
+      events.borrow_mut().push($out);
     }
   }};
 
-  ($events:expr, $x:ident, $y:ident, $e:expr) => {{
+  (prevent |$event:ident: $typ:ident| { ($events:expr) < $out:expr }) => {{
     let events = $events.clone();
-    move |_: $x| {
-      events.borrow_mut().push(AppEvent::$y($e));
+    move |$event: $typ| {
+      $event.prevent_default();
+      events.borrow_mut().push($out);
     }
   }};
 }
@@ -77,19 +72,52 @@ impl App {
       .unwrap();
 
     js! {@(no_return)
+      const canvas = @{&canvas};
       // setup the buffer size
       // see https://webglfundamentals.org/webgl/lessons/webgl-resizing-the-canvas.html
-      const realToCSSPixels = window.devicePixelRatio;
-      (@{&canvas}).width = @{config.size.0} * realToCSSPixels;
-      (@{&canvas}).height = @{config.size.1} * realToCSSPixels;
+//      const realToCSSPixels = window.devicePixelRatio;
+      canvas.width = 10;
+      canvas.height = 10;
 
       // setup the canvas size
-      (@{&canvas}).style.width = @{config.size.0} + "px";
-      (@{&canvas}).style.height = @{config.size.1} + "px";
+//      canvas.style.width = width + "px";
+//      canvas.style.height = height + "px";
 
       // Make it focusable
       // https://stackoverflow.com/questions/12886286/addeventlistener-for-keydown-on-canvas
-      @{&canvas}.tabIndex = 1;
+      canvas.tabIndex = 1;
+
+      // infinite turning
+      canvas.addEventListener("mousedown", ev => {
+        canvas.requestPointerLock();
+      }, false);
+      canvas.addEventListener("mouseup", ev => {
+        document.exitPointerLock();
+      }, false);
+
+      function resize() {
+        const realToCSSPixels = window.devicePixelRatio;
+
+        // Lookup the size the browser is displaying the canvas in CSS pixels
+        // and compute a size needed to make our drawingbuffer match it in
+        // device pixels.
+        const displayWidth  = Math.floor(canvas.clientWidth  * realToCSSPixels);
+        const displayHeight = Math.floor(canvas.clientHeight * realToCSSPixels);
+
+        // Check if the canvas is not the same size.
+        if (canvas.width  !== displayWidth ||
+            canvas.height !== displayHeight) {
+
+          // Make the canvas the same size
+          canvas.width  = displayWidth;
+          canvas.height = displayHeight;
+        }
+      }
+      window.addEventListener("resize", ev => {
+        resize();
+      }, false);
+      resize();
+      Promise.resolve().then(resize);
     };
 
     if !config.show_cursor {
@@ -124,68 +152,53 @@ impl App {
   fn setup_listener(&mut self) {
     let canvas: &CanvasElement = self.canvas();
 
-    canvas.add_event_listener(map_event! {
-      self.events,
-      MouseDownEvent,
-      MouseDown,
-      e,
-      events::MouseButtonEvent {button:match e.button() {
-        MouseButton::Left => 0,
-        MouseButton::Wheel => 1,
-        MouseButton::Right => 2,
-        MouseButton::Button4 => 3,
-        MouseButton::Button5 => 4,
-      }},
-      false
+    canvas.add_event_listener(map_events! {
+      |e: MouseDownEvent| {
+        (self.events) < AppEvent::MouseDown(
+          events::MouseButtonEvent {button:match e.button() {
+            MouseButton::Left => 0,
+            MouseButton::Wheel => 1,
+            MouseButton::Right => 2,
+            MouseButton::Button4 => 3,
+            MouseButton::Button5 => 4,
+          }}
+        )
+      }
     });
-    canvas.add_event_listener(map_event! {
-        self.events,
-        MouseUpEvent,
-        MouseUp,
-        e,
-        events::MouseButtonEvent {button:match e.button() {
-          MouseButton::Left => 0,
-          MouseButton::Wheel => 1,
-          MouseButton::Right => 2,
-          MouseButton::Button4 => 3,
-          MouseButton::Button5 => 4,
-        }},
-        true
-    });
-
-    canvas.add_event_listener({
-      let canvas = canvas.clone();
-      let canvas_x: f64 = js! { return @{&canvas}.getBoundingClientRect().left; }
-        .try_into()
-        .unwrap();
-      let canvas_y: f64 = js! { return @{&canvas}.getBoundingClientRect().top; }
-        .try_into()
-        .unwrap();
-      let events = (self.events).clone();
-      move |e: MouseMoveEvent| {
-        e.prevent_default();
-        events.borrow_mut().push(
-          AppEvent::MousePos(
-            (e.offset_x(), e.offset_y(), e.movement_x() as f64, e.movement_y() as f64),
-            e.buttons()
-          )
-        );
+    canvas.add_event_listener(map_events! {
+      |e: MouseUpEvent| {
+        (self.events) < AppEvent::MouseUp(
+          events::MouseButtonEvent {button:match e.button() {
+            MouseButton::Left => 0,
+            MouseButton::Wheel => 1,
+            MouseButton::Right => 2,
+            MouseButton::Button4 => 3,
+            MouseButton::Button5 => 4,
+          }}
+        )
       }
     });
 
-    canvas.add_event_listener(map_event! {
-      self.events,
-      KeyDownEvent,
-      KeyDown,
-      e,
-      events::KeyDownEvent {
-        code: e.code(),
-        key: e.key(),
-        shift: e.shift_key(),
-        alt: e.alt_key(),
-        ctrl: e.ctrl_key(),
-      },
-      true
+    canvas.add_event_listener(map_events! {
+      |e: PointerMoveEvent| {
+        (self.events) < AppEvent::MousePos(
+          (e.client_x() as f64, e.client_y() as f64, e.movement_x() as f64, e.movement_y() as f64), e.buttons()
+        )
+      }
+    });
+
+    canvas.add_event_listener(map_events! {
+      prevent |e: KeyDownEvent| {
+        (self.events) < AppEvent::KeyDown(
+          events::KeyDownEvent {
+            code: e.code(),
+            key: e.key(),
+            shift: e.shift_key(),
+            alt: e.alt_key(),
+            ctrl: e.ctrl_key(),
+          }
+        )
+      }
     });
 
     // canvas.add_event_listener(map_event!{
@@ -198,29 +211,27 @@ impl App {
     //     }
     // });
 
-    canvas.add_event_listener(map_event! {
-      self.events,
-      KeyUpEvent,
-      KeyUp,
-      e,
-      events::KeyUpEvent {
-        code: e.code(),
-        key: e.key(),
-        shift: e.shift_key(),
-        alt: e.alt_key(),
-        ctrl: e.ctrl_key(),
-      },
-      true
+    canvas.add_event_listener(map_events! {
+      prevent |e: KeyUpEvent| {
+        (self.events) < AppEvent::KeyUp(
+          events::KeyUpEvent {
+            code: e.code(),
+            key: e.key(),
+            shift: e.shift_key(),
+            alt: e.alt_key(),
+            ctrl: e.ctrl_key(),
+          }
+        )
+      }
     });
 
-    canvas.add_event_listener({
+    window().add_event_listener({
       let canvas = canvas.clone();
 
-      map_event! {
-        self.events,
-        ResizeEvent,
-        Resized,
-        (canvas.offset_width() as u32, canvas.offset_height() as u32)
+      map_events! {
+        |e: ResizeEvent| {
+          (self.events) < AppEvent::Resized((canvas.offset_width() as u32, canvas.offset_height() as u32))
+        }
       }
     });
   }

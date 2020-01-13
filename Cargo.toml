@@ -7,28 +7,25 @@ edition = "2018"
 [dependencies]
 stdweb = "0.4"
 stdweb-derive = "0.5"
-serde = "1.0"
-serde_derive = "1.0"
-rand = { version ="0.5", features=["stdweb"] }
+serde = "1"
+serde_derive = "1"
+rand = { version = "0.7", features=["stdweb"] }
 cgmath = "0.17"
-nalgebra = "0.17"
-gltf = "0.11"
-bitflags = "1.0"
+# nalgebra = "0.19"
+gltf = "0.14"
+bitflags = "1"
 
 [dependencies.engine_codegen]
 version = "*"
 path = "./engine_codegen"
 
 [dependencies.image]
-version = "0.21"
+version = "0.22"
 default-features = false
 features = ["png_codec", "tga", "jpeg"]
 
 [build-dependencies]
-webgl_generator = "0.1.0"
-
-[patch.crates-io]
-gltf = { git = "https://github.com/ForsakenHarmony/gltf.git" }
+webgl_generator = "0.2"
 
 [profile.release]
 opt-level = "z"

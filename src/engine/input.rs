@@ -19,6 +19,8 @@ pub enum Button {
   /// The fifth mouse button (browser forward).
   Mouse5,
 
+  Shift,
+
   A,
   B,
   C,
@@ -164,7 +166,7 @@ impl Input {
         self.size = size;
       }
       AppEvent::MousePos(p, state) => {
-        self.mouse = p;
+        self.mouse = (p.0, p.1, self.mouse.2 + p.2, self.mouse.3 + p.3);
         for b in vec![MouseButton::Left, MouseButton::Wheel, MouseButton::Right, MouseButton::Button4, MouseButton::Button5].into_iter() {
           let evt = MouseButtonEvent {
             button: match b {

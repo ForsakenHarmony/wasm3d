@@ -81,7 +81,7 @@ struct VertexUnused;
 
 impl VertexFormat for VertexUnused {}
 
-impl VertexFormat for Box<VertexFormat> {
+impl VertexFormat for Box<dyn VertexFormat> {
   fn flags(&self) -> VertexFlags { self.deref().flags() }
   fn create_buffers(&self, renderer: &Renderer, indices: &[u16]) -> (VAO, Vec<VBO>, VBO) {
     self.deref().create_buffers(renderer, indices)

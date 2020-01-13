@@ -55,6 +55,10 @@ impl Camera {
     self.view_proj = self.proj * self.view;
   }
 
+  pub fn get_view(&self) -> Matrix4<f32> {
+    self.view
+  }
+
   pub fn update(&mut self) {
     self.view = Matrix4::look_at(self.pos, self.target, Vector3::unit_y());
     self.view_proj = self.proj * self.view;
@@ -74,7 +78,7 @@ pub struct Renderer {
   size: (u32, u32),
   shaders: HashMap<TypeId, ShaderProgram>,
   shader_config: ShaderConfig,
-  meshes: Vec<Mesh<Box<VertexFormat>>>,
+  meshes: Vec<Mesh<Box<dyn VertexFormat>>>,
   queue: Vec<(MeshRef, Matrix4<f32>)>,
   texture_index: usize,
 }
@@ -95,6 +99,10 @@ impl Renderer {
       queue: Vec::new(),
       texture_index: 0,
     }
+  }
+
+  pub fn set_size(&mut self, size: (u32, u32)) {
+    self.size = size;
   }
 
   pub fn aspect(&self) -> f32 {
@@ -136,7 +144,7 @@ impl Renderer {
   {
     // get the shader program for the vertex type, or create one
     let type_id = TypeId::of::<V>();
-    let mesh = Mesh::new(&self, vertices as Box<VertexFormat>, indices);
+    let mesh = Mesh::new(&self, vertices as Box<dyn VertexFormat>, indices);
     let program = self.shaders.entry(type_id).or_insert(ShaderProgram::new(Rc::clone(&self.gl), &self.shader_config, mesh.vertices.flags()));
     self.meshes.push(mesh);
     MeshRef(self.meshes.len() - 1, type_id)

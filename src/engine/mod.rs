@@ -25,7 +25,7 @@ use crate::engine::shader::ShaderConfig;
 use crate::engine::app::AppEvent::MouseDown;
 use crate::engine::input::Input;
 
-pub type Result<R> = std::result::Result<R, Box<::std::error::Error>>;
+pub type Result<R> = std::result::Result<R, Box<dyn ::std::error::Error>>;
 
 pub trait State {
   fn new(renderer: &mut Ctx) -> Result<Self> where Self: ::std::marker::Sized;
@@ -55,9 +55,18 @@ impl Ctx {
   }
 }
 
-pub fn run<T: State>(size: (u32, u32), title: &'static str) where T: 'static {
-  let config = AppConfig::new(title, size);
+fn log<T: Into<String>>(msg: T) {
+  js! {@(no_return)
+    console.log(@{msg.into()});
+  }
+}
+
+pub fn run<T: State>(title: &'static str) where T: 'static {
+  let config = AppConfig::new(title);
   let web_app = WebApp::new(config);
+  let mut size = (100, 100);
+
+  log(format!("size: {:?})", size));
 
   let gl = WebGL2RenderingContext::new(web_app.canvas());
   let gl = Rc::new(gl);
@@ -73,7 +82,14 @@ pub fn run<T: State>(size: (u32, u32), title: &'static str) where T: 'static {
   let mut last = 0.0;
   let mut frametimes = Vec::new();
 
+  let mut first = true;
+
   web_app.run(move |app, t| {
+    if first {
+      first = false;
+      size = (app.canvas().width(), app.canvas().height());
+    }
+
     let t = t / 1000.0;
     let delta = t - last;
     last = t;
@@ -82,6 +98,14 @@ pub fn run<T: State>(size: (u32, u32), title: &'static str) where T: 'static {
 
     ctx.input.flush();
     for event in app.events.borrow_mut().drain(..) {
+      match event {
+        AppEvent::Resized(new_size) => {
+          log(format!("size: {:?})", new_size));
+          size = new_size;
+          ctx.renderer().set_size(size);
+        },
+        _ => {},
+      }
       ctx.input.handle_event(event);
     }
 

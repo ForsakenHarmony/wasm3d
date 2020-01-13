@@ -16,7 +16,7 @@ use stdweb::web::event::MouseButtonsState;
 
 pub struct AppConfig {
   pub title: String,
-  pub size: (u32, u32),
+//  pub size: (u32, u32),
   pub vsync: bool,
   pub headless: bool,
   pub fullscreen: bool,
@@ -25,10 +25,10 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-  pub fn new<T: Into<String>>(title: T, size: (u32, u32)) -> AppConfig {
+  pub fn new<T: Into<String>>(title: T) -> AppConfig {
     AppConfig {
       title: title.into(),
-      size,
+//      size,
       vsync: true,
       headless: false,
       fullscreen: false,

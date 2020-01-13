@@ -40,8 +40,9 @@ use crate::engine::app::AppEvent;
 use stdweb::web::event::MouseButton;
 use crate::engine::Ctx;
 use crate::engine::input::Button;
+use gltf::iter::Buffers;
 
-type Result<R> = std::result::Result<R, Box<std::error::Error>>;
+type Result<R> = std::result::Result<R, Box<dyn std::error::Error>>;
 
 fn load_image(buffer: &[u8]) -> Result<(u16, u16, Vec<u8>)> {
   let img = image::load_from_memory(buffer)?.to_rgba();
@@ -62,6 +63,7 @@ struct GameState {
   angle_x: f64,
   angle_y: f64,
   camera: Camera,
+  last_aspect: f32,
   movement: Vector3<f32>,
 }
 
@@ -74,7 +76,11 @@ impl State for GameState {
 
     let img = load_image(include_bytes!("../static/f-texture.png"))?;
 
-    let (document, buffers, images) = ::gltf::import_slice(include_bytes!("../static/fox.glb")).unwrap();
+//    let model = ::gltf::Gltf::from_slice(include_bytes!("../static/fox.glb")).unwrap();
+//    let images = model.images().collect::<Vec<_>>();
+//    let buffers = model.buffers().collect::<Vec<_>>();
+//    let document = model.document;
+    let (document, buffers, images) = ::gltf::import_slice(include_bytes!("../static/fox.glb").as_ref()).unwrap();
 
     fn read_buffer<T: Copy>(buffers: &Vec<::gltf::buffer::Data>, accessor: &::gltf::Accessor) -> Vec<T> {
       fn cast<T: Copy>(chunk: &[u8]) -> T {
@@ -127,13 +133,16 @@ impl State for GameState {
     };
     let fox_mesh = ctx.renderer().create_mesh(Box::new(fox_vertices), Some(index_buffer));
 
+    let aspect = ctx.renderer().aspect();
+
     Ok(GameState {
       f: ctx.renderer().create_mesh(Box::new(vertices), None),
       fox: fox_mesh,
       texture: ctx.renderer().create_texture(img.2.as_slice(), img.0, img.1),
       angle_x: 0.0,
       angle_y: 0.0,
-      camera: Camera::perspective(Deg(60.0), ctx.renderer().aspect(), 1.0, 2000.0, Point3::new(0.0, 0.0, 0.0)),
+      camera: Camera::perspective(Deg(70.0), aspect, 1.0, 2000.0, Point3::new(0.0, 0.0, 0.0)),
+      last_aspect: aspect,
       movement: Vector3::new(0.,0.,0.),
     })
   }
@@ -142,11 +151,13 @@ impl State for GameState {
     let mouse_down = ctx.input().is_down(Button::LeftMouse);
     let (dx, dy) = ctx.input().mouse_delta();
 
-//    log(format!("{:#?}", ctx.input()));
+//    log(format!("{:?}", ctx.input().mouse_delta()));
+
+    let sensitivity = 0.1;
 
     if mouse_down {
-      self.angle_x = (self.angle_x + (dx * 0.1)) % 360.0;
-      self.angle_y = (self.angle_y + (dy * 0.1)) % 360.0;
+      self.angle_x = (self.angle_x + (dx * sensitivity)) % 360.0;
+      self.angle_y = (self.angle_y + (dy * sensitivity)) % 360.0;
     }
 
 //    log(format!("({:.2}, {:.2})", self.angle_x, self.angle_y));
@@ -157,6 +168,7 @@ impl State for GameState {
     let back = ctx.input().is_down(Button::S);
     let up = ctx.input().is_down(Button::E);
     let down = ctx.input().is_down(Button::Q);
+    let shift = ctx.input().is_down(Button::Shift);
 
     let movement = Vector3::new(
       if left && !right { 1.0 } else if right && !left { -1.0 } else { 0.0 },
@@ -183,6 +195,15 @@ impl State for GameState {
   }
 
   fn render(&mut self, renderer: &mut Renderer) -> Result<()> {
+    {
+      let aspect = renderer.aspect();
+      if self.last_aspect != aspect {
+        let view = self.camera.get_view();
+        self.camera = Camera::perspective(Deg(70.0), aspect, 1.0, 2000.0, self.camera.get_pos());
+        self.camera.set_view(view);
+        self.last_aspect = aspect;
+      }
+    }
     renderer.clear(0.0, 0.0, 0.0, 0.0);
 
     let num_fs = 5;
@@ -223,7 +244,7 @@ pub fn main() {
 //    }
   }));
 
-  run::<GameState>((1280, 720), "Test");
+  run::<GameState>("Test");
 }
 
 fn get_geometry() -> Vec<f32> {
